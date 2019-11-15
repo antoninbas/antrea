@@ -90,6 +90,11 @@ test-fmt:
 	@echo "===> Checking format of Go files <==="
 	@test -z "$$(gofmt -s -l -d $(GO_FILES) | tee /dev/stderr)"
 
+test-tidy:
+	@echo
+	@echo "===> Checking go.mod tidiness <==="
+	@$(CURDIR)/hack/tidy-check.sh
+
 .PHONY: fmt
 fmt:
 	@echo
