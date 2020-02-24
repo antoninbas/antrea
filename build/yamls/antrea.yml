@@ -350,6 +350,8 @@ spec:
           name: antrea-config
           readOnly: true
           subPath: antrea-controller.conf
+        - mountPath: /var/run/antrea-ddlog
+          name: host-var-run-antrea-ddlog
       hostNetwork: true
       nodeSelector:
         beta.kubernetes.io/os: linux
@@ -364,6 +366,9 @@ spec:
       - configMap:
           name: antrea-config-476k567258
         name: antrea-config
+      - hostPath:
+          path: /var/run/antrea-ddlog
+        name: host-var-run-antrea-ddlog
 ---
 apiVersion: apiregistration.k8s.io/v1
 kind: APIService

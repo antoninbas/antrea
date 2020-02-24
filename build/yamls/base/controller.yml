@@ -85,7 +85,12 @@ spec:
               mountPath: /etc/antrea/antrea-controller.conf
               subPath: antrea-controller.conf
               readOnly: true
+            - name: host-var-run-antrea-ddlog
+              mountPath: /var/run/antrea-ddlog
       volumes:
         - name: antrea-config
           configMap:
             name: antrea-config
+        - name: host-var-run-antrea-ddlog
+          hostPath:
+            path: /var/run/antrea-ddlog

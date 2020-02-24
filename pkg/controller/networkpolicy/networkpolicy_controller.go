@@ -21,11 +21,13 @@ package networkpolicy
 import (
 	"fmt"
 	"net"
+	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	uuid "github.com/satori/go.uuid"
 	v1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -871,11 +873,31 @@ func (n *NetworkPolicyController) enqueueInternalNetworkPolicy(key string) {
 	n.internalNetworkPolicyQueue.Add(key)
 }
 
+func dumpOneStore(store storage.Interface, name string) {
+	f, _ := os.Create(name)
+	for _, v := range store.List() {
+		spew.Fprintf(f, "%v\n", v)
+	}
+	f.Sync()
+}
+
+func (n *NetworkPolicyController) dumpStore() {
+	dumpOneStore(n.internalNetworkPolicyStore, "/var/run/antrea-ddlog/np.ref.txt")
+	dumpOneStore(n.addressGroupStore, "/var/run/antrea-ddlog/address-group.ref.txt")
+	dumpOneStore(n.appliedToGroupStore, "/var/run/antrea-ddlog/applied-to.ref.txt")
+}
+
+func (n *NetworkPolicyController) dumpStoreUntil(stopCh <-chan struct{}) {
+	wait.Until(n.dumpStore, time.Second, stopCh)
+}
+
 // Run begins watching and syncing of a NetworkPolicyController.
 func (n *NetworkPolicyController) Run(stopCh <-chan struct{}) {
 	defer n.appliedToGroupQueue.ShutDown()
 	defer n.addressGroupQueue.ShutDown()
 	defer n.internalNetworkPolicyQueue.ShutDown()
+
+	go n.dumpStoreUntil(stopCh)
 
 	klog.Info("Starting NetworkPolicy controller")
 	defer klog.Info("Shutting down NetworkPolicy controller")

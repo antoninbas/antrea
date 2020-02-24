@@ -8,6 +8,14 @@ GO_FILES        := $(shell find . -type d -name '.cache' -prune -o -type f -name
 GOPATH          ?= $$($(GO) env GOPATH)
 DOCKER_CACHE    := $(CURDIR)/.cache
 
+CGO_LDFLAGS:=-L$(CURDIR)/ddlog/libs -lnetworkpolicy_controller_ddlog
+CGO_CPPFLAGS:=-I$(CURDIR)/ddlog
+LD_LIBRARY_PATH:=$(CURDIR)/ddlog/libs
+
+export CGO_LDFLAGS
+export CGO_CPPFLAGS
+export LD_LIBRARY_PATH
+
 .PHONY: all
 all: build
 
@@ -74,7 +82,7 @@ docker-tidy: $(DOCKER_CACHE)
 
 .PHONY: .linux-bin
 .linux-bin:
-	GOBIN=$(BINDIR) $(GO) install $(GOFLAGS) -ldflags '$(LDFLAGS)' github.com/vmware-tanzu/antrea/cmd/...
+	GOBIN=$(BINDIR) $(GO) install $(GOFLAGS) -p 2 -ldflags '$(LDFLAGS)' github.com/vmware-tanzu/antrea/cmd/...
 
 # TODO: strip binary when building releases
 ANTCTL_BINARIES := antctl-darwin antctl-linux antctl-windows

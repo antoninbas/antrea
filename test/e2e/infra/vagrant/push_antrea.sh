@@ -10,6 +10,7 @@ pushd $THIS_DIR
 
 ANTREA_YML=$THIS_DIR/../../../../build/yamls/antrea.yml
 ANTREA_IPSEC_YML=$THIS_DIR/../../../../build/yamls/antrea-ipsec.yml
+DDLOG_SO=$THIS_DIR/../../../../ddlog/libs/libnetworkpolicy_controller_ddlog.so
 
 if [ ! -f ssh-config ]; then
     echo "File ssh-config does not exist in current directory"
@@ -65,12 +66,12 @@ waitForNodes "${pids[@]}"
 echo "Done!"
 
 echo "Copying Antrea deployment YAML to every node..."
-scp -F ssh-config $ANTREA_YML $ANTREA_IPSEC_YML k8s-node-master:~/ &
+scp -F ssh-config $ANTREA_YML $ANTREA_IPSEC_YML $DDLOG_SO k8s-node-master:~/ &
 pids[0]=$!
 # Loop over all worker nodes and copy image to each one
 for ((i=1; i<=$NUM_WORKERS; i++)); do
     name="k8s-node-worker-$i"
-    scp -F ssh-config $ANTREA_YML $ANTREA_IPSEC_YML $name:~/ &
+    scp -F ssh-config $ANTREA_YML $ANTREA_IPSEC_YML $DDLOG_SO $name:~/ &
     pids[$i]=$!
 done
 # Wait for all child processes to complete

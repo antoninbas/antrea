@@ -19,6 +19,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/vmware/differential-datalog/go/pkg/ddlog"
 	genericapiserver "k8s.io/apiserver/pkg/server"
 	genericoptions "k8s.io/apiserver/pkg/server/options"
 	"k8s.io/client-go/informers"
@@ -27,6 +28,7 @@ import (
 	"github.com/vmware-tanzu/antrea/pkg/antctl"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/storage"
+	ddlogcontroller "github.com/vmware-tanzu/antrea/pkg/controller/ddlog"
 	"github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy"
 	"github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy/store"
 	"github.com/vmware-tanzu/antrea/pkg/k8s"
@@ -38,6 +40,18 @@ import (
 // Determine how often we go through reconciliation (between current and desired state)
 // Same as in https://github.com/kubernetes/sample-controller/blob/master/main.go
 const informerDefaultResync time.Duration = 30 * time.Second
+
+func k8sLogger(msg string) {
+	klog.Errorf(msg)
+}
+
+type outRecordHandler struct {
+	controller *ddlogcontroller.Controller
+}
+
+func (h *outRecordHandler) Handle(tableID ddlog.TableID, record ddlog.Record, polarity ddlog.OutPolarity) {
+	h.controller.HandleRecordOut(tableID, record, polarity)
+}
 
 // run starts Antrea Controller with the given options and waits for termination signal.
 func run(o *Options) error {
@@ -83,6 +97,45 @@ func run(o *Options) error {
 		return fmt.Errorf("error when creating local antctl server: %w", err)
 	}
 
+	ddlog.SetErrMsgPrinter(k8sLogger)
+
+	addressGroupStore2 := store.NewAddressGroupStore()
+	appliedToGroupStore2 := store.NewAppliedToGroupStore()
+	networkPolicyStore2 := store.NewNetworkPolicyStore()
+
+	// outRecordHandler, _ := ddlog.NewOutRecordStdoutDumper()
+	// outRecordHandler, err := ddlog.NewOutRecordDumper("/var/run/antrea-ddlog/out.txt")
+	// if err != nil {
+	// 	klog.Fatalf("Error when creating out.txt")
+	// }
+
+	handler := &outRecordHandler{nil}
+
+	ddlogProgram, err := ddlog.NewProgram(1, handler)
+	if err != nil {
+		klog.Fatalf("Error when creating DDLog program: %v", err)
+	}
+	defer func() {
+		klog.Infof("Stopping DDLog program")
+		if err := ddlogProgram.Stop(); err != nil {
+			klog.Errorf("Error when stopping DDLog program: %v", err)
+		}
+	}()
+
+	ddlogProgram.StartRecordingCommands("/var/run/antrea-ddlog/cmds.txt")
+
+	ddlogController := ddlogcontroller.NewController(
+		client,
+		podInformer,
+		namespaceInformer,
+		networkPolicyInformer,
+		ddlogProgram,
+		addressGroupStore2,
+		appliedToGroupStore2,
+		networkPolicyStore2,
+	)
+	handler.controller = ddlogController
+
 	// set up signal capture: the first SIGTERM / SIGINT signal is handled gracefully and will
 	// cause the stopCh channel to be closed; if another signal is received before the program
 	// exits, we will force exit.
@@ -94,6 +147,8 @@ func run(o *Options) error {
 	go controllerMonitor.Run(stopCh)
 
 	go networkPolicyController.Run(stopCh)
+
+	go ddlogController.Run(stopCh)
 
 	preparedAPIServer := apiServer.GenericAPIServer.PrepareRun()
 	// Set up the antctl handlers on the controller API server for remote access.
