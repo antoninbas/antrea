@@ -31,8 +31,9 @@ require (
 	github.com/spf13/cobra v0.0.5
 	github.com/spf13/pflag v1.0.3
 	github.com/streamrail/concurrent-map v0.0.0-20160823150647-8bf1e9bacbf6 // indirect
-	github.com/stretchr/testify v1.4.0
+	github.com/stretchr/testify v1.5.1
 	github.com/vishvananda/netlink v1.0.0
+	github.com/vmware/differential-datalog/go v0.0.0-20200224173731-c18082d95857
 	github.com/vmware/octant v0.8.0
 	golang.org/x/crypto v0.0.0-20191128160524-b544559bb6d1
 	golang.org/x/exp v0.0.0-20190121172915-509febef88a4
@@ -42,13 +43,13 @@ require (
 	golang.org/x/sys v0.0.0-20200122134326-e047566fdf82
 	golang.org/x/time v0.0.0-20190308202827-9d24e82272b4 // indirect
 	google.golang.org/grpc v1.22.0
-	gopkg.in/yaml.v2 v2.2.2
+	gopkg.in/yaml.v2 v2.2.8
 	k8s.io/api v0.0.0-20190620084959-7cf5895f2711
 	k8s.io/apimachinery v0.0.0-20190612205821-1799e75a0719
 	k8s.io/apiserver v0.0.0-20190620085212-47dc9a115b18
 	k8s.io/client-go v0.0.0-20190620085101-78d2af792bab
 	k8s.io/component-base v0.0.0-20190620085130-185d68e6e6ea
-	k8s.io/klog v0.3.3
+	k8s.io/klog v1.0.0
 	k8s.io/kube-openapi v0.0.0-20190228160746-b3a7cee44a30
 	k8s.io/utils v0.0.0-20190607212802-c55fbcfc754a // indirect
 )

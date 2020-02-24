@@ -19,6 +19,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/vmware/differential-datalog/go/pkg/ddlog"
 	genericopenapi "k8s.io/apiserver/pkg/endpoints/openapi"
 	genericapiserver "k8s.io/apiserver/pkg/server"
 	genericoptions "k8s.io/apiserver/pkg/server/options"
@@ -29,6 +30,7 @@ import (
 	"github.com/vmware-tanzu/antrea/pkg/apiserver"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/openapi"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/storage"
+	ddlogcontroller "github.com/vmware-tanzu/antrea/pkg/controller/ddlog"
 	"github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy"
 	"github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy/store"
 	"github.com/vmware-tanzu/antrea/pkg/k8s"
@@ -41,6 +43,10 @@ import (
 // Use the same default value as kube-controller-manager:
 // https://github.com/kubernetes/kubernetes/blob/release-1.17/pkg/controller/apis/config/v1alpha1/defaults.go#L120
 const informerDefaultResync = 12 * time.Hour
+
+func k8sLogger(msg string) {
+	klog.Errorf(msg)
+}
 
 // run starts Antrea Controller with the given options and waits for termination signal.
 func run(o *Options) error {
@@ -86,6 +92,35 @@ func run(o *Options) error {
 		return fmt.Errorf("error when creating local antctl server: %w", err)
 	}
 
+	ddlog.SetErrMsgPrinter(k8sLogger)
+
+	// outRecordHandler, _ := ddlog.NewOutRecordStdoutDumper()
+	outRecordHandler, err := ddlog.NewOutRecordDumper("/tmp/out.txt")
+	if err != nil {
+		klog.Fatalf("Error when creating out.txt")
+	}
+
+	ddlogProgram, err := ddlog.NewProgram(1, outRecordHandler)
+	if err != nil {
+		klog.Fatalf("Error when creating DDLog program: %v", err)
+	}
+	defer func() {
+		klog.Infof("Stopping DDLog program")
+		if err := ddlogProgram.Stop(); err != nil {
+			klog.Errorf("Error when stopping DDLog program: %v", err)
+		}
+	}()
+
+	ddlogProgram.StartRecordingCommands("/tmp/cmds.txt")
+
+	ddlogController := ddlogcontroller.NewController(
+		client,
+		podInformer,
+		namespaceInformer,
+		networkPolicyInformer,
+		ddlogProgram,
+	)
+
 	// set up signal capture: the first SIGTERM / SIGINT signal is handled gracefully and will
 	// cause the stopCh channel to be closed; if another signal is received before the program
 	// exits, we will force exit.
@@ -97,6 +132,8 @@ func run(o *Options) error {
 	go controllerMonitor.Run(stopCh)
 
 	go networkPolicyController.Run(stopCh)
+
+	go ddlogController.Run(stopCh)
 
 	preparedAPIServer := apiServer.GenericAPIServer.PrepareRun()
 	// Set up the antctl handlers on the controller API server for remote access.
