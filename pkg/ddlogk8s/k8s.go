@@ -211,13 +211,13 @@ func RecordToLabelSelectorRequirement(record ddlog.Record) *metav1.LabelSelector
 
 	var operator metav1.LabelSelectorOperator
 	switch rOperator.Name() {
-	case "k8spolicy.LabelSelectorOpIn":
+	case "k8spolicy_LabelSelectorOpIn":
 		operator = metav1.LabelSelectorOpIn
-	case "k8spolicy.LabelSelectorOpNotIn":
+	case "k8spolicy_LabelSelectorOpNotIn":
 		operator = metav1.LabelSelectorOpNotIn
-	case "k8spolicy.LabelSelectorOpExists":
+	case "k8spolicy_LabelSelectorOpExists":
 		operator = metav1.LabelSelectorOpExists
-	case "k8spolicy.LabelSelectorOpDoesNotExist":
+	case "k8spolicy_LabelSelectorOpDoesNotExist":
 		operator = metav1.LabelSelectorOpDoesNotExist
 	}
 

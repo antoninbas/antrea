@@ -876,7 +876,7 @@ func (n *NetworkPolicyController) enqueueInternalNetworkPolicy(key string) {
 func dumpOneStore(store storage.Interface, name string) {
 	f, _ := os.Create(name)
 	for _, v := range store.List() {
-		spew.Fprintf(f, "%v\n", v)
+		spew.Fprintf(f, "%#v\n", v)
 	}
 	f.Sync()
 }

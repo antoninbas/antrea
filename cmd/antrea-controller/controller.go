@@ -25,6 +25,8 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/klog"
 
+	"github.com/davecgh/go-spew/spew"
+
 	"github.com/vmware-tanzu/antrea/pkg/antctl"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/storage"
@@ -55,6 +57,10 @@ func (h *outRecordHandler) Handle(tableID ddlog.TableID, record ddlog.Record, po
 
 // run starts Antrea Controller with the given options and waits for termination signal.
 func run(o *Options) error {
+	spew.Config.SortKeys = true
+	// required for printing k8s sets (k8s.io/apimachinery/pkg/util/sets)
+	spew.Config.SpewKeys = true
+
 	klog.Infof("Starting Antrea Controller (version %s)", version.GetFullVersion())
 	// Create K8s Clientset, CRD Clientset and SharedInformerFactory for the given config.
 	client, crdClient, err := k8s.CreateClients(o.config.ClientConnection)

@@ -201,7 +201,7 @@ func (c *Controller) enqueueNetworkPolicy(obj interface{}) {
 func dumpOneStore(store storage.Interface, name string) {
 	f, _ := os.Create(name)
 	for _, v := range store.List() {
-		spew.Fprintf(f, "%v\n", v)
+		spew.Fprintf(f, "%#v\n", v)
 	}
 	f.Sync()
 }
@@ -225,17 +225,17 @@ func toGroupSelector(record ddlog.Record) *antreatypes.GroupSelector {
 	var namespaceSelector *metav1.LabelSelector
 	var namespace string
 	switch rNamespaceSelector.Name() {
-	case "NSSelectorNS":
+	case "types_NSSelectorNS":
 		namespace = rNamespaceSelector.At(0).ToString()
-	case "NSSelectorLS":
+	case "types_NSSelectorLS":
 		namespaceSelector = ddlogk8s.RecordToLabelSelector(rNamespaceSelector.At(0))
 	default:
-		klog.Errorf("Not a valid namespace selector")
+		klog.Errorf("Not a valid namespace selector %s", rNamespaceSelector.Name())
 	}
 
 	var podSelector *metav1.LabelSelector
-	if rPodSelector.Name() == "std.Some" {
-		podSelector = ddlogk8s.RecordToLabelSelector(rPodSelector.At(2))
+	if rPodSelector.Name() == "std_Some" {
+		podSelector = ddlogk8s.RecordToLabelSelector(rPodSelector.At(0))
 	}
 
 	return &antreatypes.GroupSelector{
@@ -335,7 +335,15 @@ func (c *Controller) handleAddressGroup(record ddlog.Record, polarity ddlog.OutP
 
 func toDirection(record ddlog.Record) networking.Direction {
 	r := record.AsStruct()
-	return networking.Direction(r.Name())
+	switch r.Name() {
+	case "types_DirectionIn":
+		return networking.DirectionIn
+	case "types_DirectionOut":
+		return networking.DirectionOut
+	default:
+		klog.Errorf("Not a valid direction %s", r.Name())
+	}
+	return networking.Direction("")
 }
 
 func toService(record ddlog.Record) *networking.Service {
@@ -350,7 +358,7 @@ func toService(record ddlog.Record) *networking.Service {
 	protocol = &p
 
 	var port *int32
-	if rPort.Name() == "std.Some" {
+	if rPort.Name() == "std_Some" {
 		p := rPort.At(0).ToI32()
 		port = &p
 	}
@@ -398,14 +406,26 @@ func toNetworkPolicyPeer(record ddlog.Record) *networking.NetworkPolicyPeer {
 	rAddressGroups := r.At(0).AsVector()
 	rIPBlocks := r.At(1).AsVector()
 
-	addressGroups := make([]string, rAddressGroups.Size())
+	// The current Antrea controller code uses nil slices and not empty slices for these
+
+	// addressGroups := make([]string, rAddressGroups.Size())
+	// for i := 0; i < rAddressGroups.Size(); i++ {
+	// 	addressGroups[i] = rAddressGroups.At(i).ToString()
+	// }
+
+	// ipBlocks := make([]networking.IPBlock, rIPBlocks.Size())
+	// for i := 0; i < rIPBlocks.Size(); i++ {
+	// 	ipBlocks[i] = *toIPBlock(rIPBlocks.At(i))
+	// }
+
+	var addressGroups []string
 	for i := 0; i < rAddressGroups.Size(); i++ {
-		addressGroups[i] = rAddressGroups.At(i).ToString()
+		addressGroups = append(addressGroups, rAddressGroups.At(i).ToString())
 	}
 
-	ipBlocks := make([]networking.IPBlock, rIPBlocks.Size())
+	var ipBlocks []networking.IPBlock
 	for i := 0; i < rIPBlocks.Size(); i++ {
-		ipBlocks[i] = *toIPBlock(rIPBlocks.At(i))
+		ipBlocks = append(ipBlocks, *toIPBlock(rIPBlocks.At(i)))
 	}
 
 	return &networking.NetworkPolicyPeer{
@@ -418,9 +438,14 @@ func toNetworkPolicyRule(record ddlog.Record) *networking.NetworkPolicyRule {
 	r := record.AsStruct()
 
 	rServices := r.At(3).AsVector()
-	services := make([]networking.Service, rServices.Size())
+	// The current Antrea controller code uses a nil slice and not an empty slice
+	// services := make([]networking.Service, rServices.Size())
+	// for i := 0; i < rServices.Size(); i++ {
+	// 	services[i] = *toService(rServices.At(i))
+	// }
+	var services []networking.Service
 	for i := 0; i < rServices.Size(); i++ {
-		services[i] = *toService(rServices.At(i))
+		services = append(services, *toService(rServices.At(i)))
 	}
 
 	return &networking.NetworkPolicyRule{
@@ -438,8 +463,8 @@ func (c *Controller) handleNetworkPolicyOut(record ddlog.Record, polarity ddlog.
 		return
 	}
 	rDescr := r.At(0).AsStruct()
-	rRules := r.At(1).AsVector()
-	rAppliedToGroups := r.At(2).AsVector()
+	rRules := rDescr.At(3).AsVector()
+	rAppliedToGroups := rDescr.At(4).AsVector()
 
 	rules := make([]networking.NetworkPolicyRule, rRules.Size())
 	for i := 0; i < rRules.Size(); i++ {
@@ -468,6 +493,8 @@ func (c *Controller) handleNetworkPolicyOut(record ddlog.Record, polarity ddlog.
 }
 
 func (c *Controller) HandleRecordOut(tableID ddlog.TableID, record ddlog.Record, polarity ddlog.OutPolarity) {
+	klog.Infof("DDlog output record: %s:%s:%s", ddlog.GetTableName(tableID), record.Dump(), polarity)
+
 	switch tableID {
 	case ddlogk8s.AppliedToGroupTableID:
 		c.handleAppliedToGroup(record, polarity)
