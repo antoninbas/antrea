@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	networkinginformers "k8s.io/client-go/informers/networking/v1"
@@ -35,8 +37,11 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
 
+	"github.com/vmware-tanzu/antrea/pkg/apis/networking"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/storage"
+	antreatypes "github.com/vmware-tanzu/antrea/pkg/controller/types"
 	"github.com/vmware-tanzu/antrea/pkg/ddlogk8s"
+	"github.com/vmware-tanzu/antrea/pkg/k8s"
 	"github.com/vmware/differential-datalog/go/pkg/ddlog"
 )
 
@@ -195,7 +200,6 @@ func (c *Controller) enqueueNetworkPolicy(obj interface{}) {
 
 func dumpOneStore(store storage.Interface, name string) {
 	f, _ := os.Create(name)
-	f.WriteString("AAAAA\n")
 	for _, v := range store.List() {
 		spew.Fprintf(f, "%v\n", v)
 	}
@@ -222,7 +226,7 @@ func toGroupSelector(record ddlog.Record) *antreatypes.GroupSelector {
 	var namespace string
 	switch rNamespaceSelector.Name() {
 	case "NSSelectorNS":
-		namespace = rNamespaceSelector.At(0).ToSTring()
+		namespace = rNamespaceSelector.At(0).ToString()
 	case "NSSelectorLS":
 		namespaceSelector = ddlogk8s.RecordToLabelSelector(rNamespaceSelector.At(0))
 	default:
@@ -242,70 +246,235 @@ func toGroupSelector(record ddlog.Record) *antreatypes.GroupSelector {
 	}
 }
 
+func toSpanMeta(record ddlog.Record) *antreatypes.SpanMeta {
+	r := record.AsSet()
+	spanMeta := &antreatypes.SpanMeta{
+		NodeNames: sets.NewString(),
+	}
+	for i := 0; i < r.Size(); i++ {
+		spanMeta.NodeNames.Insert(r.At(i).ToString())
+	}
+	return spanMeta
+}
+
+func toPodReference(record ddlog.Record) networking.PodReference {
+	r := record.AsStruct()
+	return networking.PodReference{
+		Name:      r.At(0).ToString(),
+		Namespace: r.At(1).ToString(),
+	}
+}
+
+func toPodSet(record ddlog.Record) antreatypes.PodSet {
+	r := record.AsSet()
+	podSet := antreatypes.PodSet{}
+	for i := 0; i < r.Size(); i++ {
+		podSet.Insert(toPodReference(r.At(i)))
+	}
+	return podSet
+}
+
 func (c *Controller) handleAppliedToGroup(record ddlog.Record, polarity ddlog.OutPolarity) {
 	r, err := record.AsStructSafe()
 	if err != nil {
 		klog.Errorf("Record is not a struct")
 		return
 	}
+	rDescr := r.At(0).AsStruct()
+	rPodsByNode := r.At(1).AsMap()
+
+	podsByNode := make(map[string]antreatypes.PodSet)
+	for i := 0; i < rPodsByNode.Size(); i++ {
+		rKey, rValue := rPodsByNode.At(i)
+		podsByNode[rKey.ToString()] = toPodSet(rValue)
+	}
+
 	appliedToGroup := &antreatypes.AppliedToGroup{
-		UID:      ddlogk8s.RecordToUID(r.At(0)),
-		Name:     r.At(1).ToString(),
-		Selector: *toGroupSelector(r.At(2)),
+		UID:        ddlogk8s.RecordToUID(rDescr.At(0)),
+		Name:       rDescr.At(1).ToString(),
+		Selector:   *toGroupSelector(rDescr.At(2)),
+		PodsByNode: podsByNode,
+		SpanMeta:   *toSpanMeta(r.At(2)),
 	}
 	if polarity == ddlog.OutPolarityInsert {
-		c.internalNetworkPolicyStore.Create()
+		c.appliedToGroupStore.Create(appliedToGroup)
 	} else {
-
+		key := appliedToGroup.Name
+		c.appliedToGroupStore.Delete(key)
 	}
-}
-
-func (c *Controller) handleAppliedToGroupPodsByNode(record ddlog.Record, polarity ddlog.OutPolarity) {
-
-}
-
-func (c *Controller) handleAppliedToGroupSpan(record ddlog.Record, polarity ddlog.OutPolarity) {
-
 }
 
 func (c *Controller) handleAddressGroup(record ddlog.Record, polarity ddlog.OutPolarity) {
+	r, err := record.AsStructSafe()
+	if err != nil {
+		klog.Errorf("Record is not a struct")
+		return
+	}
+	rDescr := r.At(0).AsStruct()
+	rAddresses := r.At(1).AsSet()
 
+	addresses := sets.NewString()
+	for i := 0; i < rAddresses.Size(); i++ {
+		addresses.Insert(rAddresses.At(i).ToString())
+	}
+
+	addressGroup := &antreatypes.AddressGroup{
+		UID:       ddlogk8s.RecordToUID(rDescr.At(0)),
+		Name:      rDescr.At(1).ToString(),
+		Selector:  *toGroupSelector(rDescr.At(2)),
+		Addresses: addresses,
+		SpanMeta:  *toSpanMeta(r.At(2)),
+	}
+	if polarity == ddlog.OutPolarityInsert {
+		c.addressGroupStore.Create(addressGroup)
+	} else {
+		key := addressGroup.Name
+		c.addressGroupStore.Delete(key)
+	}
 }
 
-func (c *Controller) handleAddressGroupAddress(record ddlog.Record, polarity ddlog.OutPolarity) {
-
+func toDirection(record ddlog.Record) networking.Direction {
+	r := record.AsStruct()
+	return networking.Direction(r.Name())
 }
 
-func (c *Controller) handleAddressGroupSpan(record ddlog.Record, polarity ddlog.OutPolarity) {
+func toService(record ddlog.Record) *networking.Service {
+	r := record.AsStruct()
+	rProtocol := r.At(0)
+	rPort := r.At(1).AsStruct()
 
+	var protocol *networking.Protocol
+	// for some reason the DDlog program is using Protocol here and not
+	// Option<Protocol>. Maybe it just defaults to TCP.
+	p := networking.Protocol(rProtocol.ToString())
+	protocol = &p
+
+	var port *int32
+	if rPort.Name() == "std.Some" {
+		p := rPort.At(0).ToI32()
+		port = &p
+	}
+
+	return &networking.Service{
+		Protocol: protocol,
+		Port:     port,
+	}
+}
+
+func toIPAddress(record ddlog.Record) networking.IPAddress {
+	r := record.AsStruct().At(0).AsVector()
+	address := make([]byte, r.Size())
+	for i := 0; i < r.Size(); i++ {
+		address[i] = byte(r.At(i).ToU32())
+	}
+	return address
+}
+
+func toIPNet(record ddlog.Record) *networking.IPNet {
+	r := record.AsStruct()
+	return &networking.IPNet{
+		IP:           toIPAddress(r.At(0)),
+		PrefixLength: r.At(1).ToI32(),
+	}
+}
+
+func toIPBlock(record ddlog.Record) *networking.IPBlock {
+	r := record.AsStruct()
+	rExcept := r.At(1).AsVector()
+
+	except := make([]networking.IPNet, rExcept.Size())
+	for i := 0; i < rExcept.Size(); i++ {
+		except[i] = *toIPNet(rExcept.At(i))
+	}
+
+	return &networking.IPBlock{
+		CIDR:   *toIPNet(r.At(0)),
+		Except: except,
+	}
+}
+
+func toNetworkPolicyPeer(record ddlog.Record) *networking.NetworkPolicyPeer {
+	r := record.AsStruct()
+	rAddressGroups := r.At(0).AsVector()
+	rIPBlocks := r.At(1).AsVector()
+
+	addressGroups := make([]string, rAddressGroups.Size())
+	for i := 0; i < rAddressGroups.Size(); i++ {
+		addressGroups[i] = rAddressGroups.At(i).ToString()
+	}
+
+	ipBlocks := make([]networking.IPBlock, rIPBlocks.Size())
+	for i := 0; i < rIPBlocks.Size(); i++ {
+		ipBlocks[i] = *toIPBlock(rIPBlocks.At(i))
+	}
+
+	return &networking.NetworkPolicyPeer{
+		AddressGroups: addressGroups,
+		IPBlocks:      ipBlocks,
+	}
+}
+
+func toNetworkPolicyRule(record ddlog.Record) *networking.NetworkPolicyRule {
+	r := record.AsStruct()
+
+	rServices := r.At(3).AsVector()
+	services := make([]networking.Service, rServices.Size())
+	for i := 0; i < rServices.Size(); i++ {
+		services[i] = *toService(rServices.At(i))
+	}
+
+	return &networking.NetworkPolicyRule{
+		Direction: toDirection(r.At(0)),
+		From:      *toNetworkPolicyPeer(r.At(1)),
+		To:        *toNetworkPolicyPeer(r.At(2)),
+		Services:  services,
+	}
 }
 
 func (c *Controller) handleNetworkPolicyOut(record ddlog.Record, polarity ddlog.OutPolarity) {
+	r, err := record.AsStructSafe()
+	if err != nil {
+		klog.Errorf("Record is not a struct")
+		return
+	}
+	rDescr := r.At(0).AsStruct()
+	rRules := r.At(1).AsVector()
+	rAppliedToGroups := r.At(2).AsVector()
 
-}
+	rules := make([]networking.NetworkPolicyRule, rRules.Size())
+	for i := 0; i < rRules.Size(); i++ {
+		rules[i] = *toNetworkPolicyRule(rRules.At(i))
+	}
 
-func (c *Controller) handleNetworkPolicyOutSpan(record ddlog.Record, polarity ddlog.OutPolarity) {
+	appliedToGroups := make([]string, rAppliedToGroups.Size())
+	for i := 0; i < rAppliedToGroups.Size(); i++ {
+		appliedToGroups[i] = rAppliedToGroups.At(i).ToString()
+	}
 
+	networkPolicy := &antreatypes.NetworkPolicy{
+		UID:             ddlogk8s.RecordToUID(rDescr.At(0)),
+		Name:            rDescr.At(1).ToString(),
+		Namespace:       rDescr.At(2).ToString(),
+		Rules:           rules,
+		AppliedToGroups: appliedToGroups,
+		SpanMeta:        *toSpanMeta(r.At(1)),
+	}
+	if polarity == ddlog.OutPolarityInsert {
+		c.internalNetworkPolicyStore.Create(networkPolicy)
+	} else {
+		key := k8s.NamespacedName(networkPolicy.Namespace, networkPolicy.Name)
+		c.internalNetworkPolicyStore.Delete(key)
+	}
 }
 
 func (c *Controller) HandleRecordOut(tableID ddlog.TableID, record ddlog.Record, polarity ddlog.OutPolarity) {
 	switch tableID {
 	case ddlogk8s.AppliedToGroupTableID:
 		c.handleAppliedToGroup(record, polarity)
-	case ddlogk8s.AppliedToGroupPodsByNodeTableID:
-		c.handleAppliedToGroupPodsByNode(record, polarity)
-	case ddlogk8s.AppliedToGroupSpanTableID:
-		c.handleAppliedToGroupSpan(record, polarity)
 	case ddlogk8s.AddressGroupTableID:
 		c.handleAddressGroup(record, polarity)
-	case ddlogk8s.AddressGroupAddressTableID:
-		c.handleAddressGroupAddress(record, polarity)
-	case ddlogk8s.AddressGroupSpanTableID:
-		c.handleAddressGroupSpan(record, polarity)
 	case ddlogk8s.NetworkPolicyOutTableID:
 		c.handleNetworkPolicyOut(record, polarity)
-	case ddlogk8s.NetworkPolicyOutSpanTableID:
-		c.handleNetworkPolicyOutSpan(record, polarity)
 	default:
 		klog.Errorf("Unknown output table ID: %d", tableID)
 	}
