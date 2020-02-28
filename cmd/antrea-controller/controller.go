@@ -48,10 +48,12 @@ func k8sLogger(msg string) {
 }
 
 type outRecordHandler struct {
-	controller *ddlogcontroller.Controller
+	fileHandler ddlog.OutRecordHandler
+	controller  *ddlogcontroller.Controller
 }
 
 func (h *outRecordHandler) Handle(tableID ddlog.TableID, record ddlog.Record, polarity ddlog.OutPolarity) {
+	h.fileHandler.Handle(tableID, record, polarity)
 	h.controller.HandleRecordOut(tableID, record, polarity)
 }
 
@@ -92,13 +94,14 @@ func run(o *Options) error {
 	appliedToGroupStore2 := store.NewAppliedToGroupStore()
 	networkPolicyStore2 := store.NewNetworkPolicyStore()
 
-	// outRecordHandler, _ := ddlog.NewOutRecordStdoutDumper()
-	// outRecordHandler, err := ddlog.NewOutRecordDumper("/var/run/antrea-ddlog/out.txt")
-	// if err != nil {
-	// 	klog.Fatalf("Error when creating out.txt")
-	// }
-
-	handler := &outRecordHandler{nil}
+	fileHandler, err := ddlog.NewOutRecordDumper("/var/run/antrea-ddlog/out.txt")
+	if err != nil {
+		klog.Fatalf("Error when creating out.txt")
+	}
+	handler := &outRecordHandler{
+		fileHandler: fileHandler,
+		controller:  nil,
+	}
 
 	ddlogProgram, err := ddlog.NewProgram(1, handler)
 	if err != nil {

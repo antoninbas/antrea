@@ -35,7 +35,7 @@ var (
 	LabelSelectorOpNotInConstructor        = ddlog.NewCString("k8spolicy.LabelSelectorOpNotIn")
 	LabelSelectorOpExistsConstructor       = ddlog.NewCString("k8spolicy.LabelSelectorOpExists")
 	LabelSelectorOpDoesNotExistConstructor = ddlog.NewCString("k8spolicy.LabelSelectorOpDoesNotExist")
-	LabelSelectorRequirementConstructor    = ddlog.NewCString("k8spolicy.LabelSelectorRequirementConstructor")
+	LabelSelectorRequirementConstructor    = ddlog.NewCString("k8spolicy.LabelSelectorRequirement")
 	LabelSelectorConstructor               = ddlog.NewCString("k8spolicy.LabelSelector")
 	IPBlockConstructor                     = ddlog.NewCString("k8spolicy.IPBlock")
 	UIDConstructor                         = ddlog.NewCString("k8spolicy.UID")

@@ -390,9 +390,14 @@ func toIPBlock(record ddlog.Record) *networking.IPBlock {
 	r := record.AsStruct()
 	rExcept := r.At(1).AsVector()
 
-	except := make([]networking.IPNet, rExcept.Size())
+	// The current Antrea controller code uses a nil slice and not an empty slice
+	// except := make([]networking.IPNet, rExcept.Size())
+	// for i := 0; i < rExcept.Size(); i++ {
+	// 	except[i] = *toIPNet(rExcept.At(i))
+	// }
+	var except []networking.IPNet
 	for i := 0; i < rExcept.Size(); i++ {
-		except[i] = *toIPNet(rExcept.At(i))
+		except = append(except, *toIPNet(rExcept.At(i)))
 	}
 
 	return &networking.IPBlock{
