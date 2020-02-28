@@ -74,34 +74,17 @@ func run(o *Options) error {
 	nodeInformer := informerFactory.Core().V1().Nodes()
 
 	// Create Antrea object storage.
-	addressGroupStore := store.NewAddressGroupStore()
-	appliedToGroupStore := store.NewAppliedToGroupStore()
-	networkPolicyStore := store.NewNetworkPolicyStore()
+	addressGroupStore1 := store.NewAddressGroupStore()
+	appliedToGroupStore1 := store.NewAppliedToGroupStore()
+	networkPolicyStore1 := store.NewNetworkPolicyStore()
 
 	networkPolicyController := networkpolicy.NewNetworkPolicyController(client,
 		podInformer,
 		namespaceInformer,
 		networkPolicyInformer,
-		addressGroupStore,
-		appliedToGroupStore,
-		networkPolicyStore)
-
-	apiServerConfig, err := createAPIServerConfig(o.config.ClientConnection.Kubeconfig,
-		addressGroupStore,
-		appliedToGroupStore,
-		networkPolicyStore)
-	if err != nil {
-		return fmt.Errorf("error creating API server config: %v", err)
-	}
-	apiServer, err := apiServerConfig.Complete(informerFactory).New()
-	if err != nil {
-		return fmt.Errorf("error creating API server: %v", err)
-	}
-
-	antctlServer, err := antctl.NewLocalServer()
-	if err != nil {
-		return fmt.Errorf("error when creating local antctl server: %w", err)
-	}
+		addressGroupStore1,
+		appliedToGroupStore1,
+		networkPolicyStore1)
 
 	ddlog.SetErrMsgPrinter(k8sLogger)
 
@@ -141,6 +124,36 @@ func run(o *Options) error {
 		networkPolicyStore2,
 	)
 	handler.controller = ddlogController
+
+	var addressGroupStore, appliedToGroupStore, networkPolicyStore storage.Interface
+	if o.controller == "ref" {
+		addressGroupStore = addressGroupStore1
+		appliedToGroupStore = appliedToGroupStore1
+		networkPolicyStore = networkPolicyStore1
+	} else if o.controller == "ddlog" {
+		addressGroupStore = addressGroupStore2
+		appliedToGroupStore = appliedToGroupStore2
+		networkPolicyStore = networkPolicyStore2
+	} else {
+		panic("bad NP controller implementaion")
+	}
+
+	apiServerConfig, err := createAPIServerConfig(o.config.ClientConnection.Kubeconfig,
+		addressGroupStore,
+		appliedToGroupStore,
+		networkPolicyStore)
+	if err != nil {
+		return fmt.Errorf("error creating API server config: %v", err)
+	}
+	apiServer, err := apiServerConfig.Complete(informerFactory).New()
+	if err != nil {
+		return fmt.Errorf("error creating API server: %v", err)
+	}
+
+	antctlServer, err := antctl.NewLocalServer()
+	if err != nil {
+		return fmt.Errorf("error when creating local antctl server: %w", err)
+	}
 
 	// set up signal capture: the first SIGTERM / SIGINT signal is handled gracefully and will
 	// cause the stopCh channel to be closed; if another signal is received before the program

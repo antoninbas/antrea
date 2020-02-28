@@ -16,6 +16,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 
 	"io/ioutil"
 
@@ -27,7 +28,8 @@ type Options struct {
 	// The path of configuration file.
 	configFile string
 	// The configuration object
-	config *ControllerConfig
+	config     *ControllerConfig
+	controller string
 }
 
 func newOptions() *Options {
@@ -39,6 +41,7 @@ func newOptions() *Options {
 // addFlags adds flags to fs and binds them to options.
 func (o *Options) addFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.configFile, "config", o.configFile, "The path to the configuration file")
+	fs.StringVar(&o.controller, "controller", "ref", "The NP Controller implementation to use (ref or ddlog)")
 }
 
 // complete completes all the required options.
@@ -57,6 +60,9 @@ func (o *Options) complete(args []string) error {
 func (o *Options) validate(args []string) error {
 	if len(args) != 0 {
 		return errors.New("No arguments are supported")
+	}
+	if o.controller != "ref" && o.controller != "ddlog" {
+		return fmt.Errorf("NP Controller implementation '%s' is not supported", o.controller)
 	}
 	return nil
 }
