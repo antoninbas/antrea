@@ -103,6 +103,14 @@ antctl: $(ANTCTL_BINARIES)
 	@echo "==> Running unit tests <=="
 	$(GO) test -race -cover github.com/vmware-tanzu/antrea/pkg/...
 
+.PHONY: ddlog-test
+ddlog-test:
+	$(GO) test -v -bench=BenchmarkDDlogController -run=XXX github.com/vmware-tanzu/antrea/pkg/controller/ddlog -benchmem -memprofile ddlog-memprofile.out -cpuprofile ddlog-profile.out
+
+.PHONY: ddlog-test
+native-test:
+	$(GO) test -v -bench=BenchmarkController -run=XXX github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy -benchmem -memprofile native-memprofile.out -cpuprofile native-profile.out
+
 .PHONY: tidy
 tidy:
 	@rm -f go.sum

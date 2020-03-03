@@ -16,6 +16,7 @@ package networkpolicy
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"reflect"
 	"testing"
@@ -36,6 +37,7 @@ import (
 	"github.com/vmware-tanzu/antrea/pkg/apis/networking"
 	"github.com/vmware-tanzu/antrea/pkg/apiserver/storage"
 	"github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy/store"
+	ctesting "github.com/vmware-tanzu/antrea/pkg/controller/testing"
 	antreatypes "github.com/vmware-tanzu/antrea/pkg/controller/types"
 )
 
@@ -1916,4 +1918,66 @@ func getPod(name, ns, nodeName, podIP string) *v1.Pod {
 			PodIP: podIP,
 		},
 	}
+}
+
+func BenchmarkController(b *testing.B) {
+	ctx, cancel := context.WithCancel(context.Background())
+	// defer cancel()
+
+	// Create the fake client.
+	client := fake.NewSimpleClientset()
+
+	informerFactory := informers.NewSharedInformerFactory(client, 0)
+	podInformer := informerFactory.Core().V1().Pods()
+	namespaceInformer := informerFactory.Core().V1().Namespaces()
+	networkPolicyInformer := informerFactory.Networking().V1().NetworkPolicies()
+
+	addressGroupStore := store.NewAddressGroupStore()
+	appliedToGroupStore := store.NewAppliedToGroupStore()
+	networkPolicyStore := store.NewNetworkPolicyStore()
+
+	c := NewNetworkPolicyController(
+		client,
+		podInformer,
+		namespaceInformer,
+		networkPolicyInformer,
+		addressGroupStore,
+		appliedToGroupStore,
+		networkPolicyStore,
+	)
+	c.podListerSynced = alwaysReady
+	c.namespaceListerSynced = alwaysReady
+	c.networkPolicyListerSynced = alwaysReady
+
+	// Make sure informers are running.
+	informerFactory.Start(ctx.Done())
+
+	go c.Run(ctx.Done())
+	time.Sleep(3 * time.Second)
+
+	namespaces, pods, nps := ctesting.GenControllerTestInputs(client)
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		ctesting.CreateControllerTestInputs(b, client, namespaces, pods, nps)
+
+		for len(networkPolicyStore.List()) != len(nps) {
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		ctesting.DeleteControllerTestInputs(b, client, namespaces, pods, nps)
+
+		for len(networkPolicyStore.List()) != 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	b.StopTimer()
+
+	time.Sleep(1 * time.Second)
+
+	cancel()
+
+	time.Sleep(3 * time.Second)
 }
