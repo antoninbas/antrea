@@ -27,8 +27,8 @@ func GenControllerTestInputs(client *fake.Clientset) (
 		},
 	}
 
-	numNodes := 100
-	numPodsPerNode := 10
+	numNodes := 200
+	numPodsPerNode := 50
 	numPods := numNodes * numPodsPerNode
 	pods := make([]*v1.Pod, numPods)
 	for i := 0; i < numNodes; i++ {

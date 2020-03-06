@@ -26,6 +26,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	coreinformers "k8s.io/client-go/informers/core/v1"
@@ -225,12 +226,12 @@ func toGroupSelector(record ddlog.Record) *antreatypes.GroupSelector {
 	var namespaceSelector *metav1.LabelSelector
 	var namespace string
 	switch rNamespaceSelector.Name() {
-	case "types_NSSelectorNS":
+	case "types.NSSelectorNS":
 		namespace = rNamespaceSelector.At(0).ToString()
-	case "types_NSSelectorLS":
+	case "types.NSSelectorLS":
 		namespaceSelector = ddlogk8s.RecordToLabelSelector(rNamespaceSelector.At(0))
 	default:
-		klog.Errorf("Not a valid namespace selector %s", rNamespaceSelector.Name())
+		klog.Errorf("Not a valid namespace selector '%s'", rNamespaceSelector.Name())
 	}
 
 	var podSelector *metav1.LabelSelector
@@ -289,10 +290,15 @@ func (c *Controller) handleAppliedToGroup(record ddlog.Record, polarity ddlog.Ou
 		podsByNode[rKey.ToString()] = toPodSet(rValue)
 	}
 
+	name := rDescr.At(1).ToString()
+	// relies on the knowledge that the uid is the same as the name (but uid
+	// is a u128 while we need a string, so by using name we avoid a
+	// conversion)
+	uid := types.UID(name)
 	appliedToGroup := &antreatypes.AppliedToGroup{
-		UID:        ddlogk8s.RecordToUID(rDescr.At(0)),
-		Name:       rDescr.At(1).ToString(),
-		Selector:   *toGroupSelector(rDescr.At(2)),
+		UID:        uid,
+		Name:       name,
+		Selector:   *toGroupSelector(rDescr.At(3)),
 		PodsByNode: podsByNode,
 		SpanMeta:   *toSpanMeta(r.At(2)),
 	}
@@ -318,10 +324,15 @@ func (c *Controller) handleAddressGroup(record ddlog.Record, polarity ddlog.OutP
 		addresses.Insert(rAddresses.At(i).ToString())
 	}
 
+	name := rDescr.At(1).ToString()
+	// relies on the knowledge that the uid is the same as the name (but uid
+	// is a u128 while we need a string, so by using name we avoid a
+	// conversion)
+	uid := types.UID(name)
 	addressGroup := &antreatypes.AddressGroup{
-		UID:       ddlogk8s.RecordToUID(rDescr.At(0)),
-		Name:      rDescr.At(1).ToString(),
-		Selector:  *toGroupSelector(rDescr.At(2)),
+		UID:       uid,
+		Name:      name,
+		Selector:  *toGroupSelector(rDescr.At(3)),
 		Addresses: addresses,
 		SpanMeta:  *toSpanMeta(r.At(2)),
 	}
@@ -336,12 +347,12 @@ func (c *Controller) handleAddressGroup(record ddlog.Record, polarity ddlog.OutP
 func toDirection(record ddlog.Record) networking.Direction {
 	r := record.AsStruct()
 	switch r.Name() {
-	case "types_DirectionIn":
+	case "types.DirectionIn":
 		return networking.DirectionIn
-	case "types_DirectionOut":
+	case "types.DirectionOut":
 		return networking.DirectionOut
 	default:
-		klog.Errorf("Not a valid direction %s", r.Name())
+		klog.Errorf("Not a valid direction '%s'", r.Name())
 	}
 	return networking.Direction("")
 }
