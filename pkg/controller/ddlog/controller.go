@@ -235,7 +235,7 @@ func toGroupSelector(record ddlog.Record) *antreatypes.GroupSelector {
 	}
 
 	var podSelector *metav1.LabelSelector
-	if rPodSelector.Name() == "std_Some" {
+	if rPodSelector.Name() == "std.Some" {
 		podSelector = ddlogk8s.RecordToLabelSelector(rPodSelector.At(0))
 	}
 
@@ -369,7 +369,7 @@ func toService(record ddlog.Record) *networking.Service {
 	protocol = &p
 
 	var port *int32
-	if rPort.Name() == "std_Some" {
+	if rPort.Name() == "std.Some" {
 		p := rPort.At(0).ToI32()
 		port = &p
 	}
@@ -436,7 +436,10 @@ func toNetworkPolicyPeer(record ddlog.Record) *networking.NetworkPolicyPeer {
 
 	var addressGroups []string
 	for i := 0; i < rAddressGroups.Size(); i++ {
-		addressGroups = append(addressGroups, rAddressGroups.At(i).ToString())
+		// we are supposed to use the name here, but the ddlog output relation uses the UID
+		// (for efficiency) and we know that uid == name once converted to the string
+		// representation
+		addressGroups = append(addressGroups, rAddressGroups.At(i).ToU128().AsUUID().String())
 	}
 
 	var ipBlocks []networking.IPBlock
@@ -489,7 +492,10 @@ func (c *Controller) handleNetworkPolicyOut(record ddlog.Record, polarity ddlog.
 
 	appliedToGroups := make([]string, rAppliedToGroups.Size())
 	for i := 0; i < rAppliedToGroups.Size(); i++ {
-		appliedToGroups[i] = rAppliedToGroups.At(i).ToString()
+		// we are supposed to use the name here, but the ddlog output relation uses the UID
+		// (for efficiency) and we know that uid == name once converted to the string
+		// representation
+		appliedToGroups[i] = rAppliedToGroups.At(i).ToU128().AsUUID().String()
 	}
 
 	networkPolicy := &antreatypes.NetworkPolicy{
@@ -528,7 +534,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	defer c.namespaceQueue.ShutDown()
 	defer c.networkPolicyQueue.ShutDown()
 
-	// go c.dumpStoreUntil(stopCh)
+	go c.dumpStoreUntil(stopCh)
 
 	klog.Info("Starting controller")
 	defer klog.Info("Shutting down controller")

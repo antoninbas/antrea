@@ -342,6 +342,8 @@ github.com/vishvananda/netns v0.0.0-20180720170159-13995c7128cc h1:R83G5ikgLMxrB
 github.com/vishvananda/netns v0.0.0-20180720170159-13995c7128cc/go.mod h1:ZjcWmFBXmLKZu9Nxj3WKYEafiSqer2rnvPr0en9UNpI=
 github.com/vmware/differential-datalog/go v0.0.0-20200225171024-2060fcc1d802 h1:l/SgPTLPKzs9LtmXnQ7xiDAkXu9t+jmhWgTdvmoagiM=
 github.com/vmware/differential-datalog/go v0.0.0-20200225171024-2060fcc1d802/go.mod h1:tP3HG0juorX5T4Ix01B60VrMCsf8uOOPbJ+Z9HpDo04=
+github.com/vmware/differential-datalog/go v0.0.0-20200309180221-54aacdbaf86d h1:hYJ7iahNaGocq/HfN9nkkKEYzrIsuSU3eJJLoeZMHaU=
+github.com/vmware/differential-datalog/go v0.0.0-20200309180221-54aacdbaf86d/go.mod h1:uTPhSDCYLpqaiSTnAax+wBN9nIqeyZfkkM8cJfiMWq4=
 github.com/wenyingd/ofnet v0.0.0-20200116061148-fd9e64ac3ebb h1:FsbOGeX9oh0MQLWfja9CWbzmkMcShlgVmoP7miTDYS0=
 github.com/wenyingd/ofnet v0.0.0-20200116061148-fd9e64ac3ebb/go.mod h1:9fZ2429qI+GTHZQ9vlTk5QrasJKh3HOSqDjYw6WmzPs=
 github.com/xiang90/probing v0.0.0-20160813154853-07dd2e8dfe18 h1:MPPkRncZLN9Kh4MEFmbnK4h3BD7AUmskWv2+EeZJCCs=

@@ -32,7 +32,7 @@ require (
 	github.com/streamrail/concurrent-map v0.0.0-20160823150647-8bf1e9bacbf6 // indirect
 	github.com/stretchr/testify v1.5.1
 	github.com/vishvananda/netlink v1.0.0
-	github.com/vmware/differential-datalog/go v0.0.0-20200225171024-2060fcc1d802
+	github.com/vmware/differential-datalog/go v0.0.0-20200309180221-54aacdbaf86d
 	github.com/vmware/octant v0.8.0
 	golang.org/x/crypto v0.0.0-20191128160524-b544559bb6d1
 	golang.org/x/exp v0.0.0-20190121172915-509febef88a4
