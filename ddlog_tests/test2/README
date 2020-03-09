@@ -1,0 +1,1 @@
+[Fail] [sig-network] NetworkPolicy [LinuxOnly] NetworkPolicy between server and client [It] should enforce egress policy allowing traffic to a server in a different namespace based on PodSelector and NamespaceSelector [Feature:NetworkPolicy]

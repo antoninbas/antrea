@@ -1,0 +1,1 @@
+[sig-network] NetworkPolicy [LinuxOnly] NetworkPolicy between server and client should enforce policy based on PodSelector with MatchExpressions[Feature:NetworkPolicy]

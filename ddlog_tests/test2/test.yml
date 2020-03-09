@@ -1,0 +1,96 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns-a
+  labels:
+    ns-name: ns-a
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns-b
+  labels:
+    ns-name: ns-b
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-ns-b-server-a-via-namespace-selector
+  namespace: ns-a
+spec:
+  podSelector:
+    matchLabels:
+      pod-name: client-a
+  policyTypes:
+    - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          ns-name: ns-b
+      podSelector:
+        matchLabels:
+          pod-name: server-a
+  - ports:
+    - protocol: UDP
+      port: 53
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox1
+  namespace: ns-a
+  labels:
+    pod-name: client-a
+spec:
+  containers:
+  - image: busybox
+    command: ["tail"]
+    args: ["-f", "/dev/null"]
+    imagePullPolicy: IfNotPresent
+    name: busybox
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox2
+  namespace: ns-b
+  labels:
+    pod-name: server-a
+spec:
+  containers:
+  - image: busybox
+    command: ["tail"]
+    args: ["-f", "/dev/null"]
+    imagePullPolicy: IfNotPresent
+    name: busybox
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox3
+  namespace: ns-b
+  labels:
+    pod-name: server-b
+spec:
+  containers:
+  - image: busybox
+    command: ["tail"]
+    args: ["-f", "/dev/null"]
+    imagePullPolicy: IfNotPresent
+    name: busybox
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox4
+  namespace: ns-a
+  labels:
+    pod-name: server-a
+spec:
+  containers:
+  - image: busybox
+    command: ["tail"]
+    args: ["-f", "/dev/null"]
+    imagePullPolicy: IfNotPresent
+    name: busybox
