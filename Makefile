@@ -111,6 +111,10 @@ ddlog-test:
 native-test:
 	$(GO) test -v -bench=BenchmarkController -run=XXX github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy -benchmem -memprofile native-memprofile.out -cpuprofile native-profile.out
 
+.PHONY: ddlog-mem
+ddlog-mem:
+	$(GO) test -c -o ddlog.test github.com/vmware-tanzu/antrea/pkg/controller/ddlog
+
 .PHONY: tidy
 tidy:
 	@rm -f go.sum

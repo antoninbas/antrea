@@ -534,7 +534,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	defer c.namespaceQueue.ShutDown()
 	defer c.networkPolicyQueue.ShutDown()
 
-	go c.dumpStoreUntil(stopCh)
+	// go c.dumpStoreUntil(stopCh)
 
 	klog.Info("Starting controller")
 	defer klog.Info("Shutting down controller")

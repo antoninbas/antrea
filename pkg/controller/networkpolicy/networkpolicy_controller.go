@@ -897,7 +897,7 @@ func (n *NetworkPolicyController) Run(stopCh <-chan struct{}) {
 	defer n.addressGroupQueue.ShutDown()
 	defer n.internalNetworkPolicyQueue.ShutDown()
 
-	go n.dumpStoreUntil(stopCh)
+	// go n.dumpStoreUntil(stopCh)
 
 	klog.Info("Starting NetworkPolicy controller")
 	defer klog.Info("Shutting down NetworkPolicy controller")
