@@ -2,6 +2,8 @@ package testing
 
 import (
 	"fmt"
+	"io/ioutil"
+	"runtime"
 	"testing"
 	"time"
 
@@ -27,8 +29,8 @@ func GenControllerTestInputs(client *fake.Clientset) (
 		},
 	}
 
-	numNodes := 20
-	numPodsPerNode := 5
+	numNodes := 200
+	numPodsPerNode := 50
 	numPods := numNodes * numPodsPerNode
 	pods := make([]*v1.Pod, numPods)
 	for i := 0; i < numNodes; i++ {
@@ -154,4 +156,12 @@ func DeleteControllerTestInputs(
 		require.Nil(t, err)
 		time.Sleep(1 * time.Millisecond)
 	}
+
+	client.ClearActions()
+}
+
+func DumpMemStats(path string) error {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return ioutil.WriteFile(path, []byte(fmt.Sprintf("%+v\n", m)), 0644)
 }

@@ -18,15 +18,19 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"reflect"
+	"runtime"
+	"runtime/pprof"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/client-go/informers"
@@ -79,7 +83,7 @@ func newController() (*fake.Clientset, *networkPolicyController) {
 func newClientset() *fake.Clientset {
 	client := fake.NewSimpleClientset()
 
-	client.PrependReactor("create", "networkpolicies", k8stesting.ReactionFunc(func(action k8stesting.Action) (bool, runtime.Object, error) {
+	client.PrependReactor("create", "networkpolicies", k8stesting.ReactionFunc(func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
 		np := action.(k8stesting.CreateAction).GetObject().(*networkingv1.NetworkPolicy)
 
 		if np.ObjectMeta.GenerateName != "" {
@@ -1966,14 +1970,106 @@ func BenchmarkController(b *testing.B) {
 			time.Sleep(10 * time.Millisecond)
 		}
 
+		ctesting.DumpMemStats("/tmp/native-mem.txt")
+
 		ctesting.DeleteControllerTestInputs(b, client, namespaces, pods, nps)
 
 		for len(networkPolicyStore.List()) != 0 {
 			time.Sleep(10 * time.Millisecond)
 		}
+
+		ctesting.DumpMemStats("/tmp/native-mem-end.txt")
 	}
 
 	b.StopTimer()
+
+	time.Sleep(1 * time.Second)
+
+	cancel()
+
+	time.Sleep(3 * time.Second)
+}
+
+func TestController(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	// defer cancel()
+
+	// Create the fake client.
+	client := fake.NewSimpleClientset()
+
+	informerFactory := informers.NewSharedInformerFactory(client, 0)
+	podInformer := informerFactory.Core().V1().Pods()
+	namespaceInformer := informerFactory.Core().V1().Namespaces()
+	networkPolicyInformer := informerFactory.Networking().V1().NetworkPolicies()
+
+	addressGroupStore := store.NewAddressGroupStore()
+	appliedToGroupStore := store.NewAppliedToGroupStore()
+	networkPolicyStore := store.NewNetworkPolicyStore()
+
+	c := NewNetworkPolicyController(
+		client,
+		podInformer,
+		namespaceInformer,
+		networkPolicyInformer,
+		addressGroupStore,
+		appliedToGroupStore,
+		networkPolicyStore,
+	)
+	c.podListerSynced = alwaysReady
+	c.namespaceListerSynced = alwaysReady
+	c.networkPolicyListerSynced = alwaysReady
+
+	// Make sure informers are running.
+	informerFactory.Start(ctx.Done())
+
+	go c.Run(ctx.Done())
+	time.Sleep(3 * time.Second)
+
+	namespaces, pods, nps := ctesting.GenControllerTestInputs(client)
+
+	dumpMem := func(path string) {
+		fmt.Printf("Writing mem profile to %s\n", path)
+		f, err := os.Create(path)
+		if err != nil {
+			panic("could not create memory profile")
+		}
+		defer f.Close() // error handling omitted for example
+		runtime.GC()    // get up-to-date statistics
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			panic("could not write memory profile")
+		}
+	}
+
+	for i := 0; i < 50; i++ {
+		fmt.Printf("Loop %v\n", i)
+		ctesting.CreateControllerTestInputs(t, client, namespaces, pods, nps)
+
+		for len(networkPolicyStore.List()) != len(nps) {
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		dumpMem(fmt.Sprintf("/tmp/mem-%d-full.out", i))
+
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		fmt.Printf("%+v\n", m)
+
+		podsList, err := client.CoreV1().Pods("testNamespace").List(metav1.ListOptions{})
+		require.Nil(t, err)
+		require.Equal(t, 10000, len(podsList.Items))
+
+		ctesting.DeleteControllerTestInputs(t, client, namespaces, pods, nps)
+
+		for len(networkPolicyStore.List()) != 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		dumpMem(fmt.Sprintf("/tmp/mem-%d-empty.out", i))
+
+		podsList, err = client.CoreV1().Pods("testNamespace").List(metav1.ListOptions{})
+		require.Nil(t, err)
+		require.Equal(t, 0, len(podsList.Items))
+	}
 
 	time.Sleep(1 * time.Second)
 

@@ -515,7 +515,7 @@ func (c *Controller) handleNetworkPolicyOut(record ddlog.Record, polarity ddlog.
 }
 
 func (c *Controller) HandleRecordOut(tableID ddlog.TableID, record ddlog.Record, polarity ddlog.OutPolarity) {
-	klog.V(2).Infof("DDlog output record: %s:%s:%s", ddlog.GetTableName(tableID), record.Dump(), polarity)
+	// klog.V(2).Infof("DDlog output record: %s:%s:%s", ddlog.GetTableName(tableID), record.Dump(), polarity)
 
 	switch tableID {
 	case ddlogk8s.AppliedToGroupTableID:
@@ -651,11 +651,11 @@ func (c *Controller) processPod(key string) error {
 	var cmd ddlog.Command
 	if err != nil { // deletion
 		r := ddlogk8s.NewRecordPodKey(namespace, name)
-		klog.V(2).Infof("DELETE POD: %s", r.Dump())
+		// klog.V(2).Infof("DELETE POD: %s", r.Dump())
 		cmd = ddlog.NewDeleteKeyCommand(ddlogk8s.PodTableID, r)
 	} else {
 		r := ddlogk8s.NewRecordPod(pod)
-		klog.V(2).Infof("UPDATE POD: %s", r.Dump())
+		// klog.V(2).Infof("UPDATE POD: %s", r.Dump())
 		cmd = ddlog.NewInsertOrUpdateCommand(ddlogk8s.PodTableID, r)
 	}
 	c.ddlogUpdatesCh <- cmd
@@ -683,11 +683,11 @@ func (c *Controller) processNamespace(key string) error {
 	var cmd ddlog.Command
 	if err != nil { // deletion
 		r := ddlogk8s.NewRecordNamespaceKey(key)
-		klog.V(2).Infof("DELETE NAMESPACE: %s", r.Dump())
+		// klog.V(2).Infof("DELETE NAMESPACE: %s", r.Dump())
 		cmd = ddlog.NewDeleteKeyCommand(ddlogk8s.NamespaceTableID, r)
 	} else {
 		r := ddlogk8s.NewRecordNamespace(namespace)
-		klog.V(2).Infof("UPDATE NAMESPACE: %s", r.Dump())
+		// klog.V(2).Infof("UPDATE NAMESPACE: %s", r.Dump())
 		cmd = ddlog.NewInsertOrUpdateCommand(ddlogk8s.NamespaceTableID, r)
 	}
 	c.ddlogUpdatesCh <- cmd
@@ -719,11 +719,11 @@ func (c *Controller) processNetworkPolicy(key string) error {
 	var cmd ddlog.Command
 	if err != nil { // deletion
 		r := ddlogk8s.NewRecordNetworkPolicyKey(namespace, name)
-		klog.V(2).Infof("DELETE NETWORKPOLICY: %s", r.Dump())
+		// klog.V(2).Infof("DELETE NETWORKPOLICY: %s", r.Dump())
 		cmd = ddlog.NewDeleteKeyCommand(ddlogk8s.NetworkPolicyTableID, r)
 	} else {
 		r := ddlogk8s.NewRecordNetworkPolicy(networkPolicy)
-		klog.V(2).Infof("UPDATE NETWORKPOLICY: %s", r.Dump())
+		// klog.V(2).Infof("UPDATE NETWORKPOLICY: %s", r.Dump())
 		cmd = ddlog.NewInsertOrUpdateCommand(ddlogk8s.NetworkPolicyTableID, r)
 	}
 	c.ddlogUpdatesCh <- cmd

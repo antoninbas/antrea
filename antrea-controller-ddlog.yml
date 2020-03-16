@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: antrea
+    component: antrea-controller
+  name: antrea-controller-ddlog
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: antrea
+      component: antrea-controller-ddlog
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: antrea
+        component: antrea-controller-ddlog
+    spec:
+      containers:
+      - args:
+        - --controller
+        - ddlog
+        command:
+        - antrea-controller
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        image: antoninbas/antrea-ddlog:latest
+        imagePullPolicy: Always
+        name: antrea-controller-ddlog
+        ports:
+        - containerPort: 443
+          protocol: TCP
+        volumeMounts:
+        - mountPath: /var/run/antrea-ddlog
+          name: host-var-run-antrea-ddlog
+      hostNetwork: true
+      nodeSelector:
+        beta.kubernetes.io/os: linux
+        kubernetes.io/hostname: 195.168.3.235
+      priorityClassName: system-cluster-critical
+      serviceAccountName: antrea-controller
+      tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/master
+      - effect: NoSchedule
+        key: node.kubernetes.io/unschedulable
+      volumes:
+      - configMap:
+          name: antrea-config-476k567258
+        name: antrea-config
+      - hostPath:
+          path: /var/run/antrea-ddlog
+        name: host-var-run-antrea-ddlog

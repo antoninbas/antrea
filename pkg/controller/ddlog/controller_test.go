@@ -85,11 +85,15 @@ func BenchmarkDDlogController(b *testing.B) {
 			time.Sleep(10 * time.Millisecond)
 		}
 
+		ctesting.DumpMemStats("/tmp/ddlog-mem.txt")
+
 		ctesting.DeleteControllerTestInputs(b, client, namespaces, pods, nps)
 
 		for len(networkPolicyStore.List()) != 0 {
 			time.Sleep(10 * time.Millisecond)
 		}
+
+		ctesting.DumpMemStats("/tmp/ddlog-mem-end.txt")
 	}
 
 	b.StopTimer()
@@ -149,7 +153,7 @@ func TestDDlogController(t *testing.T) {
 
 	// ddlogProgram.StartRecordingCommands("/tmp/cmds.txt")
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 3; i++ {
 		fmt.Printf("Loop %v\n", i)
 		ctesting.CreateControllerTestInputs(t, client, namespaces, pods, nps)
 
@@ -169,6 +173,10 @@ func TestDDlogController(t *testing.T) {
 	cancel()
 
 	time.Sleep(3 * time.Second)
+
+	require.Equal(t, 0, len(networkPolicyStore.List()))
+	require.Equal(t, 0, len(addressGroupStore.List()))
+	require.Equal(t, 0, len(appliedToGroupStore.List()))
 
 	ddlogProgram.Stop()
 }
