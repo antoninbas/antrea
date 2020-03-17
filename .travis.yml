@@ -1,19 +1,27 @@
 language: generic
 
-arch:
-  - arm64
-  - amd64
 os: linux
+
+before_script:
+  echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
 services:
   - docker
 
-env:
-  - OVS_VERSION="2.13.0"
-
-script:
-  - cd build/images/ovs && docker build -t antrea/openvswitch:$OVS_VERSION --build-arg OVS_VERSION=$OVS_VERSION . && cd -
-  - make
-  - docker tag antrea/antrea-ubuntu antoninbas/antrea-ubuntu-test
-  - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-  - docker push antoninbas/antrea-ubuntu-test
+jobs:
+  include:
+    - stage: build
+      arch: amd64
+      script: ./ci/build-docker-arch.sh amd64
+    - stage: build
+      arch: arm64
+      script: ./ci/build-docker-arch.sh arm64
+    - stage: manifest
+      addons:
+        apt:
+          packages:
+            - jq
+            - moreutils
+      script:
+        - "jq --arg experimental enabled '. + {experimental: $experimental}' ~/.docker/config.json | sponge ~/.docker/config.json" # enable experimental features in docker CLI
+        - ./ci/build-docker-manifest.sh
