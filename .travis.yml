@@ -1,0 +1,19 @@
+language: generic
+
+arch:
+  - arm64
+  - amd64
+os: linux
+
+services:
+  - docker
+
+env:
+  - OVS_VERSION="2.13.0"
+
+script:
+  - cd build/images/ovs && docker build -t antrea/openvswitch:$OVS_VERSION --build-arg OVS_VERSION=$OVS_VERSION . && cd -
+  - make
+  - docker tag antrea/antrea-ubuntu antoninbas/antrea-ubuntu-test
+  - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+  - docker push antoninbas/antrea-ubuntu-test
