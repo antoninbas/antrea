@@ -92,7 +92,7 @@ docker-tidy: $(DOCKER_CACHE)
 
 .PHONY: .linux-bin
 .linux-bin:
-	GOBIN=$(BINDIR) $(GO) install $(GOFLAGS) -p 2 -ldflags '$(LDFLAGS)' github.com/vmware-tanzu/antrea/cmd/...
+	GOBIN=$(BINDIR) $(GO) install $(GOFLAGS) -ldflags '$(LDFLAGS)' github.com/vmware-tanzu/antrea/cmd/...
 
 # TODO: strip binary when building releases
 ANTCTL_BINARIES := antctl-darwin antctl-linux antctl-windows

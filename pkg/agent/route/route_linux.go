@@ -463,7 +463,11 @@ func (c *Client) addServiceRouting() error {
 	ipRule := netlink.NewRule()
 	ipRule.IifName = c.nodeConfig.GatewayConfig.Name
 	ipRule.Mark = RtTblSelectorValue
-	ipRule.Mask = 0xffffffff
+	// the type of ipRule.Mask is int so 0xffffffff cannot be used on 32-bit
+	// architectures (e.g. arm/v7); using -1 means that the mask will be
+	// omitted in the netlink message and it means the same thing.
+	// ipRule.Mask = 0xffffffff
+	ipRule.Mask = -1
 	ipRule.Table = c.serviceRtTable.Idx
 	ipRule.Priority = AntreaIPRulePriority
 
