@@ -5,7 +5,7 @@ on:
     branches: experiment-with-travis-arm-builder
 
 jobs:
-  buildx:
+  buildx-linux-amd64:
     runs-on: ubuntu-latest
     steps:
       -
@@ -23,8 +23,65 @@ jobs:
       -
         name: Run Buildx
         env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
           OVS_VERSION: 2.13.0
-          PLATFORMS: "linux/amd64,linux/arm/v7,linux/arm64"
+          PLATFORMS: "linux/amd64"
         run: |
+          echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
           cd build/images/ovs && docker buildx build -t antrea/openvswitch:$OVS_VERSION --platform $PLATFORMS --build-arg OVS_VERSION=$OVS_VERSION . && cd -
-          docker buildx build -t antoninbas/antrea-ubuntu-march --platform $PLATFORMS -f build/images/Dockerfile.build.ubuntu .
+          docker buildx build -t antoninbas/antrea-ubuntu-multiarch --push --platform $PLATFORMS -f build/images/Dockerfile.build.ubuntu .
+
+  buildx-linux-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v1
+      -
+        name: Set up Docker Buildx
+        id: buildx
+        uses: crazy-max/ghaction-docker-buildx@v1
+        with:
+          version: latest
+      -
+        name: Available platforms
+        run: echo ${{ steps.buildx.outputs.platforms }}
+      -
+        name: Run Buildx
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          OVS_VERSION: 2.13.0
+          PLATFORMS: "linux/arm64"
+        run: |
+          echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+          cd build/images/ovs && docker buildx build -t antrea/openvswitch:$OVS_VERSION --platform $PLATFORMS --build-arg OVS_VERSION=$OVS_VERSION . && cd -
+          docker buildx build -t antoninbas/antrea-ubuntu-multiarch --push --platform $PLATFORMS -f build/images/Dockerfile.build.ubuntu .
+
+  buildx-linux-arm-v7:
+    runs-on: ubuntu-latest
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v1
+      -
+        name: Set up Docker Buildx
+        id: buildx
+        uses: crazy-max/ghaction-docker-buildx@v1
+        with:
+          version: latest
+      -
+        name: Available platforms
+        run: echo ${{ steps.buildx.outputs.platforms }}
+      -
+        name: Run Buildx
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+          OVS_VERSION: 2.13.0
+          PLATFORMS: "linux/arm/v7"
+        run: |
+          echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+          cd build/images/ovs && docker buildx build -t antrea/openvswitch:$OVS_VERSION --platform $PLATFORMS --build-arg OVS_VERSION=$OVS_VERSION . && cd -
+          docker buildx build -t antoninbas/antrea-ubuntu-multiarch --push --platform $PLATFORMS -f build/images/Dockerfile.build.ubuntu .
