@@ -28,7 +28,7 @@ func (h *outRecordHandler) Handle(tableID ddlog.TableID, record ddlog.Record, po
 
 var alwaysReady = func() bool { return true }
 
-func BenchmarkDDlogController(b *testing.B) {
+func BenchmarkDDlogController1(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	// defer cancel()
 
@@ -94,6 +94,87 @@ func BenchmarkDDlogController(b *testing.B) {
 		}
 
 		ctesting.DumpMemStats("/tmp/ddlog-mem-end.txt")
+	}
+
+	b.StopTimer()
+
+	time.Sleep(1 * time.Second)
+
+	cancel()
+
+	time.Sleep(3 * time.Second)
+}
+
+func BenchmarkDDlogController2(b *testing.B) {
+	ctx, cancel := context.WithCancel(context.Background())
+	// defer cancel()
+
+	// Create the fake client.
+	client := fake.NewSimpleClientset()
+
+	informerFactory := informers.NewSharedInformerFactory(client, 0)
+	podInformer := informerFactory.Core().V1().Pods()
+	namespaceInformer := informerFactory.Core().V1().Namespaces()
+	networkPolicyInformer := informerFactory.Networking().V1().NetworkPolicies()
+
+	handler := &outRecordHandler{
+		controller: nil,
+	}
+	// handler, _ := ddlog.NewOutRecordDumper("/tmp/out.txt")
+
+	ddlogProgram, err := ddlog.NewProgram(1, handler)
+	require.Nil(b, err)
+
+	addressGroupStore := store.NewAddressGroupStore()
+	appliedToGroupStore := store.NewAppliedToGroupStore()
+	networkPolicyStore := store.NewNetworkPolicyStore()
+
+	c := NewController(
+		client,
+		podInformer,
+		namespaceInformer,
+		networkPolicyInformer,
+		ddlogProgram,
+		addressGroupStore,
+		appliedToGroupStore,
+		networkPolicyStore,
+	)
+	handler.controller = c
+	c.podListerSynced = alwaysReady
+	c.namespaceListerSynced = alwaysReady
+	c.networkPolicyListerSynced = alwaysReady
+
+	// Make sure informers are running.
+	informerFactory.Start(ctx.Done())
+
+	go c.Run(ctx.Done())
+	time.Sleep(3 * time.Second)
+
+	namespaces, pods, nps := ctesting.GenControllerTestInputs2(client)
+
+	ddlogProgram.StartRecordingCommands("/tmp/cmds.txt")
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		ctesting.CreateControllerTestInputs2(b, client, namespaces, pods, nps)
+
+		for {
+			now := time.Now()
+			if now.Sub(addressGroupStore.LastUpdate()) > 5*time.Second &&
+				now.Sub(appliedToGroupStore.LastUpdate()) > 5*time.Second &&
+				now.Sub(networkPolicyStore.LastUpdate()) > 5*time.Second {
+				break
+			}
+			fmt.Println("Waiting...")
+			time.Sleep(time.Second)
+		}
+
+		ctesting.DeleteControllerTestInputs2(b, client, namespaces, pods, nps)
+
+		for len(networkPolicyStore.List()) != 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 
 	b.StopTimer()

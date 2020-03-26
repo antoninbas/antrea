@@ -16,6 +16,7 @@ package storage
 
 import (
 	"context"
+	"time"
 
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
@@ -82,4 +83,6 @@ type Interface interface {
 
 	// GetWatchersNum gets the number of watchers for the store.
 	GetWatchersNum() int
+
+	LastUpdate() time.Time
 }

@@ -109,6 +109,10 @@ type Controller struct {
 
 	// internalNetworkPolicyStore is the storage where the populated internal Network Policy are stored.
 	internalNetworkPolicyStore storage.Interface
+
+	appliedToGroupOut        map[string]*storeUpdate
+	addressGroupOut          map[string]*storeUpdate
+	internalNetworkPolicyOut map[string]*storeUpdate
 }
 
 // NewController returns a new *Controller.
@@ -275,11 +279,32 @@ func toPodSet(record ddlog.Record) antreatypes.PodSet {
 	return podSet
 }
 
-func (c *Controller) handleAppliedToGroup(record ddlog.Record, polarity ddlog.OutPolarity) {
+type storeUpdateType int
+
+const (
+	storeUpdateInsert storeUpdateType = iota
+	storeUpdateModify
+	storeUpdateDelete
+)
+
+type storeUpdate struct {
+	updateType storeUpdateType
+	obj        interface{} // nil for delete
+}
+
+func appliedToGroupKey(record ddlog.Record) (string, error) {
 	r, err := record.AsStructSafe()
 	if err != nil {
-		klog.Errorf("Record is not a struct")
-		return
+		return "", fmt.Errorf("Record is not a struct")
+	}
+	rDescr := r.At(0).AsStruct()
+	return rDescr.At(1).ToString(), nil
+}
+
+func appliedToGroupObj(record ddlog.Record) (string, *antreatypes.AppliedToGroup, error) {
+	r, err := record.AsStructSafe()
+	if err != nil {
+		return "", nil, fmt.Errorf("Record is not a struct")
 	}
 	rDescr := r.At(0).AsStruct()
 	rPodsByNode := r.At(1).AsMap()
@@ -302,19 +327,23 @@ func (c *Controller) handleAppliedToGroup(record ddlog.Record, polarity ddlog.Ou
 		PodsByNode: podsByNode,
 		SpanMeta:   *toSpanMeta(r.At(2)),
 	}
-	if polarity == ddlog.OutPolarityInsert {
-		c.appliedToGroupStore.Create(appliedToGroup)
-	} else {
-		key := appliedToGroup.Name
-		c.appliedToGroupStore.Delete(key)
-	}
+
+	return name, appliedToGroup, nil
 }
 
-func (c *Controller) handleAddressGroup(record ddlog.Record, polarity ddlog.OutPolarity) {
+func addressGroupKey(record ddlog.Record) (string, error) {
 	r, err := record.AsStructSafe()
 	if err != nil {
-		klog.Errorf("Record is not a struct")
-		return
+		return "", fmt.Errorf("Record is not a struct")
+	}
+	rDescr := r.At(0).AsStruct()
+	return rDescr.At(1).ToString(), nil
+}
+
+func addressGroupObj(record ddlog.Record) (string, *antreatypes.AddressGroup, error) {
+	r, err := record.AsStructSafe()
+	if err != nil {
+		return "", nil, fmt.Errorf("Record is not a struct")
 	}
 	rDescr := r.At(0).AsStruct()
 	rAddresses := r.At(1).AsSet()
@@ -336,12 +365,7 @@ func (c *Controller) handleAddressGroup(record ddlog.Record, polarity ddlog.OutP
 		Addresses: addresses,
 		SpanMeta:  *toSpanMeta(r.At(2)),
 	}
-	if polarity == ddlog.OutPolarityInsert {
-		c.addressGroupStore.Create(addressGroup)
-	} else {
-		key := addressGroup.Name
-		c.addressGroupStore.Delete(key)
-	}
+	return name, addressGroup, nil
 }
 
 func toDirection(record ddlog.Record) networking.Direction {
@@ -475,11 +499,20 @@ func toNetworkPolicyRule(record ddlog.Record) *networking.NetworkPolicyRule {
 	}
 }
 
-func (c *Controller) handleNetworkPolicyOut(record ddlog.Record, polarity ddlog.OutPolarity) {
+func networkPolicyKey(record ddlog.Record) (string, error) {
 	r, err := record.AsStructSafe()
 	if err != nil {
-		klog.Errorf("Record is not a struct")
-		return
+		return "", fmt.Errorf("Record is not a struct")
+	}
+	rDescr := r.At(0).AsStruct()
+	key := k8s.NamespacedName(rDescr.At(2).ToString(), rDescr.At(1).ToString())
+	return key, nil
+}
+
+func networkPolicyObj(record ddlog.Record) (string, *antreatypes.NetworkPolicy, error) {
+	r, err := record.AsStructSafe()
+	if err != nil {
+		return "", nil, fmt.Errorf("Record is not a struct")
 	}
 	rDescr := r.At(0).AsStruct()
 	rRules := rDescr.At(3).AsVector()
@@ -506,26 +539,107 @@ func (c *Controller) handleNetworkPolicyOut(record ddlog.Record, polarity ddlog.
 		AppliedToGroups: appliedToGroups,
 		SpanMeta:        *toSpanMeta(r.At(1)),
 	}
-	if polarity == ddlog.OutPolarityInsert {
-		c.internalNetworkPolicyStore.Create(networkPolicy)
-	} else {
-		key := k8s.NamespacedName(networkPolicy.Namespace, networkPolicy.Name)
-		c.internalNetworkPolicyStore.Delete(key)
+	key := k8s.NamespacedName(networkPolicy.Namespace, networkPolicy.Name)
+	return key, networkPolicy, nil
+}
+
+func (c *Controller) StartRecordOut() {
+	c.appliedToGroupOut = make(map[string]*storeUpdate)
+	c.addressGroupOut = make(map[string]*storeUpdate)
+	c.internalNetworkPolicyOut = make(map[string]*storeUpdate)
+}
+
+func (c *Controller) EndRecordOut() {
+	updateOneStore := func(store storage.Interface, updates map[string]*storeUpdate) {
+		for key, update := range updates {
+			switch update.updateType {
+			case storeUpdateInsert:
+				store.Create(update.obj)
+			case storeUpdateModify:
+				store.Update(update.obj)
+			case storeUpdateDelete:
+				store.Delete(key)
+			}
+		}
 	}
+	updateOneStore(c.appliedToGroupStore, c.appliedToGroupOut)
+	updateOneStore(c.addressGroupStore, c.addressGroupOut)
+	updateOneStore(c.internalNetworkPolicyStore, c.internalNetworkPolicyOut)
+}
+
+func (c *Controller) handleRecordOutInsert(tableID ddlog.TableID, record ddlog.Record) {
+	var key string
+	var obj interface{}
+	var err error
+	var updates map[string]*storeUpdate
+
+	switch tableID {
+	case ddlogk8s.AppliedToGroupTableID:
+		key, obj, err = appliedToGroupObj(record)
+		updates = c.appliedToGroupOut
+	case ddlogk8s.AddressGroupTableID:
+		key, obj, err = addressGroupObj(record)
+		updates = c.addressGroupOut
+	case ddlogk8s.NetworkPolicyOutTableID:
+		key, obj, err = networkPolicyObj(record)
+		updates = c.internalNetworkPolicyOut
+	default:
+		klog.Errorf("Unknown output table ID: %d", tableID)
+		return
+	}
+	if err != nil {
+		klog.Errorf("Error when processing insert: %v", err)
+		return
+	}
+
+	update, found := updates[key]
+	if found {
+		update.updateType = storeUpdateModify
+		update.obj = obj
+		return
+	}
+	updates[key] = &storeUpdate{storeUpdateInsert, obj}
+}
+
+func (c *Controller) handleRecordOutDelete(tableID ddlog.TableID, record ddlog.Record) {
+	var key string
+	var err error
+	var updates map[string]*storeUpdate
+
+	switch tableID {
+	case ddlogk8s.AppliedToGroupTableID:
+		key, err = appliedToGroupKey(record)
+		updates = c.appliedToGroupOut
+	case ddlogk8s.AddressGroupTableID:
+		key, err = addressGroupKey(record)
+		updates = c.addressGroupOut
+	case ddlogk8s.NetworkPolicyOutTableID:
+		key, err = networkPolicyKey(record)
+		updates = c.internalNetworkPolicyOut
+	default:
+		klog.Errorf("Unknown output table ID: %d", tableID)
+		return
+	}
+	if err != nil {
+		klog.Errorf("Error when processing delete: %v", err)
+		return
+	}
+
+	update, found := updates[key]
+	if found {
+		update.updateType = storeUpdateModify
+		update.obj = nil
+		return
+	}
+	updates[key] = &storeUpdate{storeUpdateDelete, nil}
 }
 
 func (c *Controller) HandleRecordOut(tableID ddlog.TableID, record ddlog.Record, polarity ddlog.OutPolarity) {
 	// klog.V(2).Infof("DDlog output record: %s:%s:%s", ddlog.GetTableName(tableID), record.Dump(), polarity)
-
-	switch tableID {
-	case ddlogk8s.AppliedToGroupTableID:
-		c.handleAppliedToGroup(record, polarity)
-	case ddlogk8s.AddressGroupTableID:
-		c.handleAddressGroup(record, polarity)
-	case ddlogk8s.NetworkPolicyOutTableID:
-		c.handleNetworkPolicyOut(record, polarity)
-	default:
-		klog.Errorf("Unknown output table ID: %d", tableID)
+	if polarity == ddlog.OutPolarityInsert {
+		c.handleRecordOutInsert(tableID, record)
+	} else {
+		c.handleRecordOutDelete(tableID, record)
 	}
 }
 
@@ -572,9 +686,11 @@ func (c *Controller) generateTransactions(stopCh <-chan struct{}) {
 	commitTransaction := func() {
 		transactionSize = 0
 		ctx = parentCxt
+		c.StartRecordOut()
 		if err := c.ddlogProgram.CommitTransaction(); err != nil {
 			klog.Errorf("Error when committing DDLog transaction: %v", err)
 		}
+		c.EndRecordOut()
 	}
 
 	handleCommand := func(cmd ddlog.Command) {

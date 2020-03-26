@@ -71,6 +71,8 @@ type store struct {
 	// timer is used when sending events to watchers. Hold it here to avoid unnecessary
 	// re-allocation for each event.
 	timer *time.Timer
+
+	lastUpdate time.Time
 }
 
 // NewStore creates a store based on the provided KeyFunc, Indexers, and GenEventFunc.
@@ -93,6 +95,7 @@ func NewStore(keyFunc cache.KeyFunc, indexers cache.Indexers, genEventFunc antre
 		keyFunc:      keyFunc,
 		genEventFunc: genEventFunc,
 		timer:        timer,
+		lastUpdate:   time.Now(),
 	}
 
 	go s.dispatchEvents()
@@ -152,6 +155,7 @@ func (s *store) Create(obj interface{}) error {
 	if event != nil {
 		s.processEvent(event)
 	}
+	s.lastUpdate = time.Now()
 	return nil
 }
 
@@ -181,12 +185,17 @@ func (s *store) Update(obj interface{}) error {
 	if event != nil {
 		s.processEvent(event)
 	}
+	s.lastUpdate = time.Now()
 	return nil
 }
 
 // List returns a list of all the objects.
 func (s *store) List() []interface{} {
 	return s.storage.List()
+}
+
+func (s *store) LastUpdate() time.Time {
+	return s.lastUpdate
 }
 
 // Delete deletes the object from internal cache storage.
@@ -211,6 +220,7 @@ func (s *store) Delete(key string) error {
 	if event != nil {
 		s.processEvent(event)
 	}
+	s.lastUpdate = time.Now()
 	return nil
 }
 
