@@ -285,43 +285,6 @@ type storeUpdate struct {
 	obj       interface{}
 }
 
-func addressGroupKey(record ddlog.Record) (string, error) {
-	r, err := record.AsStructSafe()
-	if err != nil {
-		return "", fmt.Errorf("Record is not a struct")
-	}
-	rDescr := r.At(0).AsStruct()
-	return rDescr.At(1).ToString(), nil
-}
-
-func addressGroupObj(record ddlog.Record) (string, *antreatypes.AddressGroup, error) {
-	r, err := record.AsStructSafe()
-	if err != nil {
-		return "", nil, fmt.Errorf("Record is not a struct")
-	}
-	rDescr := r.At(0).AsStruct()
-	rAddresses := r.At(1).AsSet()
-
-	addresses := sets.NewString()
-	for i := 0; i < rAddresses.Size(); i++ {
-		addresses.Insert(rAddresses.At(i).ToString())
-	}
-
-	name := rDescr.At(1).ToString()
-	// relies on the knowledge that the uid is the same as the name (but uid
-	// is a u128 while we need a string, so by using name we avoid a
-	// conversion)
-	uid := types.UID(name)
-	addressGroup := &antreatypes.AddressGroup{
-		UID:       uid,
-		Name:      name,
-		Selector:  *toGroupSelector(rDescr.At(3)),
-		Addresses: addresses,
-		SpanMeta:  *toSpanMeta(r.At(2)),
-	}
-	return name, addressGroup, nil
-}
-
 func toDirection(record ddlog.Record) networking.Direction {
 	r := record.AsStruct()
 	switch r.Name() {
@@ -451,50 +414,6 @@ func toNetworkPolicyRule(record ddlog.Record) *networking.NetworkPolicyRule {
 		To:        *toNetworkPolicyPeer(r.At(2)),
 		Services:  services,
 	}
-}
-
-func networkPolicyKey(record ddlog.Record) (string, error) {
-	r, err := record.AsStructSafe()
-	if err != nil {
-		return "", fmt.Errorf("Record is not a struct")
-	}
-	rDescr := r.At(0).AsStruct()
-	key := k8s.NamespacedName(rDescr.At(2).ToString(), rDescr.At(1).ToString())
-	return key, nil
-}
-
-func networkPolicyObj(record ddlog.Record) (string, *antreatypes.NetworkPolicy, error) {
-	r, err := record.AsStructSafe()
-	if err != nil {
-		return "", nil, fmt.Errorf("Record is not a struct")
-	}
-	rDescr := r.At(0).AsStruct()
-	rRules := rDescr.At(3).AsVector()
-	rAppliedToGroups := rDescr.At(4).AsVector()
-
-	rules := make([]networking.NetworkPolicyRule, rRules.Size())
-	for i := 0; i < rRules.Size(); i++ {
-		rules[i] = *toNetworkPolicyRule(rRules.At(i))
-	}
-
-	appliedToGroups := make([]string, rAppliedToGroups.Size())
-	for i := 0; i < rAppliedToGroups.Size(); i++ {
-		// we are supposed to use the name here, but the ddlog output relation uses the UID
-		// (for efficiency) and we know that uid == name once converted to the string
-		// representation
-		appliedToGroups[i] = rAppliedToGroups.At(i).ToU128().AsUUID().String()
-	}
-
-	networkPolicy := &antreatypes.NetworkPolicy{
-		UID:             ddlogk8s.RecordToUID(rDescr.At(0)),
-		Name:            rDescr.At(1).ToString(),
-		Namespace:       rDescr.At(2).ToString(),
-		Rules:           rules,
-		AppliedToGroups: appliedToGroups,
-		SpanMeta:        *toSpanMeta(r.At(1)),
-	}
-	key := k8s.NamespacedName(networkPolicy.Namespace, networkPolicy.Name)
-	return key, networkPolicy, nil
 }
 
 func (c *Controller) StartRecordOut() {
@@ -727,11 +646,8 @@ func (c *Controller) handleNetworkPolicyDescr(record ddlog.Record, polarity ddlo
 		klog.Errorf("Record is not a struct")
 		return
 	}
+	uid := ddlogk8s.RecordToUID(r.At(0))
 	name := r.At(1).ToString()
-	// relies on the knowledge that the uid is the same as the name (but uid
-	// is a u128 while we need a string, so by using name we avoid a
-	// conversion)
-	uid := types.UID(name)
 	namespace := r.At(2).ToString()
 	update, networkPolicy := c.getNetworkPolicyUpdate(namespace, name, uid)
 
