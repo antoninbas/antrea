@@ -111,7 +111,7 @@ ddlog-test:
 .PHONY: native-test
 native-test:
 	# $(GO) test -v -run=TestController -timeout=2h github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy -benchmem -memprofile native-memprofile.out -cpuprofile native-profile.out
-	$(GO) test -v -bench=BenchmarkController2 -run=XXX github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy -benchmem -memprofile native-memprofile.out -cpuprofile native-profile.out
+	$(GO) test -v -bench=BenchmarkController1 -run=XXX github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy -benchmem -memprofile native-memprofile.out -cpuprofile native-profile.out
 
 .PHONY: ddlog-mem
 ddlog-mem:

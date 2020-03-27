@@ -279,56 +279,10 @@ func toPodSet(record ddlog.Record) antreatypes.PodSet {
 	return podSet
 }
 
-type storeUpdateType int
-
-const (
-	storeUpdateInsert storeUpdateType = iota
-	storeUpdateModify
-	storeUpdateDelete
-)
-
 type storeUpdate struct {
-	updateType storeUpdateType
-	obj        interface{} // nil for delete
-}
-
-func appliedToGroupKey(record ddlog.Record) (string, error) {
-	r, err := record.AsStructSafe()
-	if err != nil {
-		return "", fmt.Errorf("Record is not a struct")
-	}
-	rDescr := r.At(0).AsStruct()
-	return rDescr.At(1).ToString(), nil
-}
-
-func appliedToGroupObj(record ddlog.Record) (string, *antreatypes.AppliedToGroup, error) {
-	r, err := record.AsStructSafe()
-	if err != nil {
-		return "", nil, fmt.Errorf("Record is not a struct")
-	}
-	rDescr := r.At(0).AsStruct()
-	rPodsByNode := r.At(1).AsMap()
-
-	podsByNode := make(map[string]antreatypes.PodSet)
-	for i := 0; i < rPodsByNode.Size(); i++ {
-		rKey, rValue := rPodsByNode.At(i)
-		podsByNode[rKey.ToString()] = toPodSet(rValue)
-	}
-
-	name := rDescr.At(1).ToString()
-	// relies on the knowledge that the uid is the same as the name (but uid
-	// is a u128 while we need a string, so by using name we avoid a
-	// conversion)
-	uid := types.UID(name)
-	appliedToGroup := &antreatypes.AppliedToGroup{
-		UID:        uid,
-		Name:       name,
-		Selector:   *toGroupSelector(rDescr.At(3)),
-		PodsByNode: podsByNode,
-		SpanMeta:   *toSpanMeta(r.At(2)),
-	}
-
-	return name, appliedToGroup, nil
+	insertCnt int
+	deleteCnt int
+	obj       interface{}
 }
 
 func addressGroupKey(record ddlog.Record) (string, error) {
@@ -552,12 +506,11 @@ func (c *Controller) StartRecordOut() {
 func (c *Controller) EndRecordOut() {
 	updateOneStore := func(store storage.Interface, updates map[string]*storeUpdate) {
 		for key, update := range updates {
-			switch update.updateType {
-			case storeUpdateInsert:
-				store.Create(update.obj)
-			case storeUpdateModify:
+			if update.insertCnt == update.deleteCnt {
 				store.Update(update.obj)
-			case storeUpdateDelete:
+			} else if update.insertCnt > update.deleteCnt {
+				store.Create(update.obj)
+			} else {
 				store.Delete(key)
 			}
 		}
@@ -567,79 +520,289 @@ func (c *Controller) EndRecordOut() {
 	updateOneStore(c.internalNetworkPolicyStore, c.internalNetworkPolicyOut)
 }
 
-func (c *Controller) handleRecordOutInsert(tableID ddlog.TableID, record ddlog.Record) {
-	var key string
-	var obj interface{}
-	var err error
-	var updates map[string]*storeUpdate
-
-	switch tableID {
-	case ddlogk8s.AppliedToGroupTableID:
-		key, obj, err = appliedToGroupObj(record)
-		updates = c.appliedToGroupOut
-	case ddlogk8s.AddressGroupTableID:
-		key, obj, err = addressGroupObj(record)
-		updates = c.addressGroupOut
-	case ddlogk8s.NetworkPolicyOutTableID:
-		key, obj, err = networkPolicyObj(record)
-		updates = c.internalNetworkPolicyOut
-	default:
-		klog.Errorf("Unknown output table ID: %d", tableID)
-		return
+func (c *Controller) getAppliedToGroupUpdate(name string, uid types.UID) (*storeUpdate, *antreatypes.AppliedToGroup) {
+	var appliedToGroup *antreatypes.AppliedToGroup
+	update, found := c.appliedToGroupOut[name]
+	if !found {
+		obj, found, _ := c.appliedToGroupStore.Get(name)
+		if !found {
+			appliedToGroup = &antreatypes.AppliedToGroup{
+				SpanMeta: antreatypes.SpanMeta{
+					NodeNames: sets.NewString(),
+				},
+				Name:       name,
+				UID:        uid,
+				PodsByNode: make(map[string]antreatypes.PodSet),
+			}
+		} else {
+			appliedToGroup = obj.(*antreatypes.AppliedToGroup)
+		}
+		update = &storeUpdate{
+			obj: appliedToGroup,
+		}
+		c.appliedToGroupOut[name] = update
+	} else {
+		appliedToGroup = update.obj.(*antreatypes.AppliedToGroup)
 	}
-	if err != nil {
-		klog.Errorf("Error when processing insert: %v", err)
-		return
-	}
-
-	update, found := updates[key]
-	if found {
-		update.updateType = storeUpdateModify
-		update.obj = obj
-		return
-	}
-	updates[key] = &storeUpdate{storeUpdateInsert, obj}
+	return update, appliedToGroup
 }
 
-func (c *Controller) handleRecordOutDelete(tableID ddlog.TableID, record ddlog.Record) {
-	var key string
-	var err error
-	var updates map[string]*storeUpdate
-
-	switch tableID {
-	case ddlogk8s.AppliedToGroupTableID:
-		key, err = appliedToGroupKey(record)
-		updates = c.appliedToGroupOut
-	case ddlogk8s.AddressGroupTableID:
-		key, err = addressGroupKey(record)
-		updates = c.addressGroupOut
-	case ddlogk8s.NetworkPolicyOutTableID:
-		key, err = networkPolicyKey(record)
-		updates = c.internalNetworkPolicyOut
-	default:
-		klog.Errorf("Unknown output table ID: %d", tableID)
-		return
-	}
+func (c *Controller) handleAppliedToGroupDescr(record ddlog.Record, polarity ddlog.OutPolarity) {
+	r, err := record.AsStructSafe()
 	if err != nil {
-		klog.Errorf("Error when processing delete: %v", err)
+		klog.Errorf("Record is not a struct")
 		return
+	}
+	name := r.At(1).ToString() // name is the key
+	// relies on the knowledge that the uid is the same as the name (but uid
+	// is a u128 while we need a string, so by using name we avoid a
+	// conversion)
+	uid := types.UID(name)
+	update, appliedToGroup := c.getAppliedToGroupUpdate(name, uid)
+
+	appliedToGroup.Selector = *toGroupSelector(r.At(3))
+	if polarity == ddlog.OutPolarityInsert {
+		update.insertCnt++
+	} else {
+		update.deleteCnt++
+	}
+}
+
+func (c *Controller) handleAppliedToGroupPodsByNode(record ddlog.Record, polarity ddlog.OutPolarity) {
+	r, err := record.AsStructSafe()
+	if err != nil {
+		klog.Errorf("Record is not a struct")
+		return
+	}
+	name := r.At(0).ToU128().AsUUID().String()
+	uid := types.UID(name)
+
+	_, appliedToGroup := c.getAppliedToGroupUpdate(name, uid)
+
+	nodeName := r.At(1).ToString()
+	if polarity == ddlog.OutPolarityInsert {
+		podSet := toPodSet(r.At(2))
+		appliedToGroup.PodsByNode[nodeName] = podSet
+	} else {
+		delete(appliedToGroup.PodsByNode, nodeName)
+	}
+}
+
+func (c *Controller) handleAppliedToGroupSpan(record ddlog.Record, polarity ddlog.OutPolarity) {
+	r, err := record.AsStructSafe()
+	if err != nil {
+		klog.Errorf("Record is not a struct")
+		return
+	}
+	name := r.At(0).ToU128().AsUUID().String()
+	uid := types.UID(name)
+
+	_, appliedToGroup := c.getAppliedToGroupUpdate(name, uid)
+
+	nodeName := r.At(1).ToString()
+	if polarity == ddlog.OutPolarityInsert {
+		appliedToGroup.NodeNames.Insert(nodeName)
+	} else {
+		appliedToGroup.NodeNames.Delete(nodeName)
+	}
+}
+
+func (c *Controller) getAddressGroupUpdate(name string, uid types.UID) (*storeUpdate, *antreatypes.AddressGroup) {
+	var addressGroup *antreatypes.AddressGroup
+	update, found := c.addressGroupOut[name]
+	if !found {
+		obj, found, _ := c.addressGroupStore.Get(name)
+		if !found {
+			addressGroup = &antreatypes.AddressGroup{
+				SpanMeta: antreatypes.SpanMeta{
+					NodeNames: sets.NewString(),
+				},
+				Name:      name,
+				UID:       uid,
+				Addresses: sets.NewString(),
+			}
+		} else {
+			addressGroup = obj.(*antreatypes.AddressGroup)
+		}
+		update = &storeUpdate{
+			obj: addressGroup,
+		}
+		c.addressGroupOut[name] = update
+	} else {
+		addressGroup = update.obj.(*antreatypes.AddressGroup)
+	}
+	return update, addressGroup
+}
+
+func (c *Controller) handleAddressGroupDescr(record ddlog.Record, polarity ddlog.OutPolarity) {
+	r, err := record.AsStructSafe()
+	if err != nil {
+		klog.Errorf("Record is not a struct")
+		return
+	}
+	name := r.At(1).ToString() // name is the key
+	// relies on the knowledge that the uid is the same as the name (but uid
+	// is a u128 while we need a string, so by using name we avoid a
+	// conversion)
+	uid := types.UID(name)
+	update, addressGroup := c.getAddressGroupUpdate(name, uid)
+
+	addressGroup.Selector = *toGroupSelector(r.At(3))
+	if polarity == ddlog.OutPolarityInsert {
+		update.insertCnt++
+	} else {
+		update.deleteCnt++
+	}
+}
+
+func (c *Controller) handleAddressGroupAddress(record ddlog.Record, polarity ddlog.OutPolarity) {
+	r, err := record.AsStructSafe()
+	if err != nil {
+		klog.Errorf("Record is not a struct")
+		return
+	}
+	name := r.At(0).ToU128().AsUUID().String()
+	uid := types.UID(name)
+
+	_, addressGroup := c.getAddressGroupUpdate(name, uid)
+
+	address := r.At(1).ToString()
+	if polarity == ddlog.OutPolarityInsert {
+		addressGroup.Addresses.Insert(address)
+	} else {
+		addressGroup.Addresses.Delete(address)
+	}
+}
+
+func (c *Controller) handleAddressGroupSpan(record ddlog.Record, polarity ddlog.OutPolarity) {
+	r, err := record.AsStructSafe()
+	if err != nil {
+		klog.Errorf("Record is not a struct")
+		return
+	}
+	name := r.At(0).ToU128().AsUUID().String()
+	uid := types.UID(name)
+
+	_, addressGroup := c.getAddressGroupUpdate(name, uid)
+
+	nodeName := r.At(1).ToString()
+	if polarity == ddlog.OutPolarityInsert {
+		addressGroup.NodeNames.Insert(nodeName)
+	} else {
+		addressGroup.NodeNames.Delete(nodeName)
+	}
+}
+
+func (c *Controller) getNetworkPolicyUpdate(namespace string, name string, uid types.UID) (*storeUpdate, *antreatypes.NetworkPolicy) {
+	var networkPolicy *antreatypes.NetworkPolicy
+	key := k8s.NamespacedName(namespace, name)
+	update, found := c.internalNetworkPolicyOut[key]
+	if !found {
+		obj, found, _ := c.internalNetworkPolicyStore.Get(key)
+		if !found {
+			networkPolicy = &antreatypes.NetworkPolicy{
+				SpanMeta: antreatypes.SpanMeta{
+					NodeNames: sets.NewString(),
+				},
+				Name:      name,
+				UID:       uid,
+				Namespace: namespace,
+			}
+		} else {
+			networkPolicy = obj.(*antreatypes.NetworkPolicy)
+		}
+		update = &storeUpdate{
+			obj: networkPolicy,
+		}
+		c.internalNetworkPolicyOut[key] = update
+	} else {
+		networkPolicy = update.obj.(*antreatypes.NetworkPolicy)
+	}
+	return update, networkPolicy
+}
+
+func (c *Controller) handleNetworkPolicyDescr(record ddlog.Record, polarity ddlog.OutPolarity) {
+	r, err := record.AsStructSafe()
+	if err != nil {
+		klog.Errorf("Record is not a struct")
+		return
+	}
+	name := r.At(1).ToString()
+	// relies on the knowledge that the uid is the same as the name (but uid
+	// is a u128 while we need a string, so by using name we avoid a
+	// conversion)
+	uid := types.UID(name)
+	namespace := r.At(2).ToString()
+	update, networkPolicy := c.getNetworkPolicyUpdate(namespace, name, uid)
+
+	rRules := r.At(3).AsVector()
+	rAppliedToGroups := r.At(4).AsVector()
+
+	rules := make([]networking.NetworkPolicyRule, rRules.Size())
+	for i := 0; i < rRules.Size(); i++ {
+		rules[i] = *toNetworkPolicyRule(rRules.At(i))
 	}
 
-	update, found := updates[key]
-	if found {
-		update.updateType = storeUpdateModify
-		update.obj = nil
+	appliedToGroups := make([]string, rAppliedToGroups.Size())
+	for i := 0; i < rAppliedToGroups.Size(); i++ {
+		// we are supposed to use the name here, but the ddlog output relation uses the UID
+		// (for efficiency) and we know that uid == name once converted to the string
+		// representation
+		appliedToGroups[i] = rAppliedToGroups.At(i).ToU128().AsUUID().String()
+	}
+
+	networkPolicy.Rules = rules
+	networkPolicy.AppliedToGroups = appliedToGroups
+
+	if polarity == ddlog.OutPolarityInsert {
+		update.insertCnt++
+	} else {
+		update.deleteCnt++
+	}
+}
+
+func (c *Controller) handleNetworkPolicySpan(record ddlog.Record, polarity ddlog.OutPolarity) {
+	r, err := record.AsStructSafe()
+	if err != nil {
+		klog.Errorf("Record is not a struct")
 		return
 	}
-	updates[key] = &storeUpdate{storeUpdateDelete, nil}
+	namespace := r.At(0).ToString()
+	name := r.At(1).ToString()
+	uid := ddlogk8s.RecordToUID(r.At(2))
+
+	_, networkPolicy := c.getNetworkPolicyUpdate(namespace, name, uid)
+
+	nodeName := r.At(3).ToString()
+	if polarity == ddlog.OutPolarityInsert {
+		networkPolicy.NodeNames.Insert(nodeName)
+	} else {
+		networkPolicy.NodeNames.Delete(nodeName)
+	}
 }
 
 func (c *Controller) HandleRecordOut(tableID ddlog.TableID, record ddlog.Record, polarity ddlog.OutPolarity) {
 	// klog.V(2).Infof("DDlog output record: %s:%s:%s", ddlog.GetTableName(tableID), record.Dump(), polarity)
-	if polarity == ddlog.OutPolarityInsert {
-		c.handleRecordOutInsert(tableID, record)
-	} else {
-		c.handleRecordOutDelete(tableID, record)
+
+	switch tableID {
+	case ddlogk8s.AppliedToGroupDescrTableID:
+		c.handleAppliedToGroupDescr(record, polarity)
+	case ddlogk8s.AppliedToGroupPodsByNodeTableID:
+		c.handleAppliedToGroupPodsByNode(record, polarity)
+	case ddlogk8s.AppliedToGroupSpanTableID:
+		c.handleAppliedToGroupSpan(record, polarity)
+	case ddlogk8s.AddressGroupDescrTableID:
+		c.handleAddressGroupDescr(record, polarity)
+	case ddlogk8s.AddressGroupAddressTableID:
+		c.handleAddressGroupAddress(record, polarity)
+	case ddlogk8s.AddressGroupSpanTableID:
+		c.handleAddressGroupSpan(record, polarity)
+	case ddlogk8s.NetworkPolicyDescrTableID:
+		c.handleNetworkPolicyDescr(record, polarity)
+	case ddlogk8s.NetworkPolicySpanTableID:
+		c.handleNetworkPolicySpan(record, polarity)
+	default:
+		klog.Errorf("Unknown output table ID: %d", tableID)
 	}
 }
 

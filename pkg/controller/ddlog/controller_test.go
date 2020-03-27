@@ -152,7 +152,7 @@ func BenchmarkDDlogController2(b *testing.B) {
 
 	namespaces, pods, nps := ctesting.GenControllerTestInputs2(client)
 
-	ddlogProgram.StartRecordingCommands("/tmp/cmds.txt")
+	// ddlogProgram.StartRecordingCommands("/tmp/cmds.txt")
 
 	b.ResetTimer()
 

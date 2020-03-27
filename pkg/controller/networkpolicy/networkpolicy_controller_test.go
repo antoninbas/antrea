@@ -1924,7 +1924,7 @@ func getPod(name, ns, nodeName, podIP string) *v1.Pod {
 	}
 }
 
-func BenchmarkController(b *testing.B) {
+func BenchmarkController1(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	// defer cancel()
 
