@@ -8,6 +8,7 @@ on:
     branches:
     - master
     - release-*
+    - netpol-fix
 jobs:
   build-antrea-image:
     name: Build Antrea image to be used for Kind e2e tests
