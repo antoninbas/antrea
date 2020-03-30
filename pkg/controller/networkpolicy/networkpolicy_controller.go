@@ -319,7 +319,7 @@ func (n *NetworkPolicyController) createAppliedToGroup(np *networkingv1.NetworkP
 // labelsMatchGroupSelector matches a Pod's labels to the
 // GroupSelector object and returns true, if and only if the labels
 // match any of the selector criteria present in the GroupSelector.
-func (n *NetworkPolicyController) labelsMatchGroupSelector(pod *v1.Pod, podNS *v1.Namespace, sel antreatypes.GroupSelector) bool {
+func (n *NetworkPolicyController) labelsMatchGroupSelector(pod *v1.Pod, podNS *v1.Namespace, sel *antreatypes.GroupSelector) bool {
 	if sel.Namespace != "" {
 		if sel.Namespace != pod.Namespace {
 			// Pods must be matched within the same Namespace.
@@ -377,21 +377,15 @@ func (n *NetworkPolicyController) labelsMatchGroupSelector(pod *v1.Pod, podNS *v
 // match the Namespace's labels.
 func (n *NetworkPolicyController) filterAddressGroupsForNamespace(namespace *v1.Namespace) sets.String {
 	matchingKeys := sets.String{}
-	addressGroups := n.addressGroupStore.List()
+	// Only cluster scoped groups can possibly select this namespace.
+	addressGroups, _ := n.addressGroupStore.GetByIndex(cache.NamespaceIndex, "")
 	for _, group := range addressGroups {
 		addrGroup := group.(*antreatypes.AddressGroup)
-		if addrGroup.Selector.NamespaceSelector == nil {
-			// This addressGroup selector does not have a namespaceSelector,
-			// skip processing.
-			continue
-		}
 		nSelector, _ := metav1.LabelSelectorAsSelector(addrGroup.Selector.NamespaceSelector)
 		if nSelector.Matches(labels.Set(namespace.Labels)) {
 			matchingKeys.Insert(addrGroup.Name)
 			klog.V(2).Infof("Namespace %s appended to AddressGroup %s", namespace.Name, addrGroup.Name)
-			continue
 		}
-		klog.V(4).Infof("Namespace %s labels do not match AddressGroup %s", namespace.Name, addrGroup.Name)
 	}
 	return matchingKeys
 }
@@ -400,16 +394,16 @@ func (n *NetworkPolicyController) filterAddressGroupsForNamespace(namespace *v1.
 // match the Pod's labels.
 func (n *NetworkPolicyController) filterAddressGroupsForPod(pod *v1.Pod) sets.String {
 	matchingKeySet := sets.String{}
-	addressGroups := n.addressGroupStore.List()
+	// AddressGroups that are in this namespace or that are cluster scoped can possibly select this Pod.
+	localAddressGroups, _ := n.addressGroupStore.GetByIndex(cache.NamespaceIndex, pod.Namespace)
+	clusterScopedAddressGroups, _ := n.addressGroupStore.GetByIndex(cache.NamespaceIndex, "")
 	podNS, _ := n.namespaceLister.Get(pod.Namespace)
-	for _, group := range addressGroups {
+	for _, group := range append(localAddressGroups, clusterScopedAddressGroups...) {
 		addrGroup := group.(*antreatypes.AddressGroup)
-		if n.labelsMatchGroupSelector(pod, podNS, addrGroup.Selector) {
+		if n.labelsMatchGroupSelector(pod, podNS, &addrGroup.Selector) {
 			matchingKeySet.Insert(addrGroup.Name)
 			klog.V(2).Infof("Pod %s/%s appended to AddressGroup %s", pod.Namespace, pod.Name, addrGroup.Name)
-			continue
 		}
-		klog.V(4).Infof("Pod %s/%s labels do not match AddressGroup %s", pod.Namespace, pod.Name, addrGroup.Name)
 	}
 	return matchingKeySet
 }
@@ -418,16 +412,16 @@ func (n *NetworkPolicyController) filterAddressGroupsForPod(pod *v1.Pod) sets.St
 // match the Pod's labels.
 func (n *NetworkPolicyController) filterAppliedToGroupsForPod(pod *v1.Pod) sets.String {
 	matchingKeySet := sets.String{}
-	appliedToGroups := n.appliedToGroupStore.List()
+	// Only AppliedToGroups that are in this namespace can possibly select this Pod as there are
+	// no cluster scoped AppliedToGroups right now.
+	appliedToGroups, _ := n.appliedToGroupStore.GetByIndex(cache.NamespaceIndex, pod.Namespace)
 	podNS, _ := n.namespaceLister.Get(pod.Namespace)
 	for _, group := range appliedToGroups {
 		appGroup := group.(*antreatypes.AppliedToGroup)
-		if n.labelsMatchGroupSelector(pod, podNS, appGroup.Selector) {
+		if n.labelsMatchGroupSelector(pod, podNS, &appGroup.Selector) {
 			matchingKeySet.Insert(appGroup.Name)
 			klog.V(2).Infof("Pod %s/%s appended to AppliedToGroup %s", pod.Namespace, pod.Name, appGroup.Name)
-			continue
 		}
-		klog.V(4).Infof("Pod %s/%s labels do not match AppliedToGroup %v", pod.Namespace, pod.Name, appGroup.Name)
 	}
 	return matchingKeySet
 }
