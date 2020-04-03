@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -28,171 +29,11 @@ func (h *outRecordHandler) Handle(tableID ddlog.TableID, record ddlog.Record, po
 
 var alwaysReady = func() bool { return true }
 
-func BenchmarkDDlogController1(b *testing.B) {
+func testDataset(t *testing.T, objects ...runtime.Object) {
 	ctx, cancel := context.WithCancel(context.Background())
-	// defer cancel()
+	defer cancel()
 
-	// Create the fake client.
-	client := fake.NewSimpleClientset()
-
-	informerFactory := informers.NewSharedInformerFactory(client, 0)
-	podInformer := informerFactory.Core().V1().Pods()
-	namespaceInformer := informerFactory.Core().V1().Namespaces()
-	networkPolicyInformer := informerFactory.Networking().V1().NetworkPolicies()
-
-	handler := &outRecordHandler{
-		controller: nil,
-	}
-
-	ddlogProgram, err := ddlog.NewProgram(1, handler)
-	require.Nil(b, err)
-
-	addressGroupStore := store.NewAddressGroupStore()
-	appliedToGroupStore := store.NewAppliedToGroupStore()
-	networkPolicyStore := store.NewNetworkPolicyStore()
-
-	c := NewController(
-		client,
-		podInformer,
-		namespaceInformer,
-		networkPolicyInformer,
-		ddlogProgram,
-		addressGroupStore,
-		appliedToGroupStore,
-		networkPolicyStore,
-	)
-	handler.controller = c
-	c.podListerSynced = alwaysReady
-	c.namespaceListerSynced = alwaysReady
-	c.networkPolicyListerSynced = alwaysReady
-
-	// Make sure informers are running.
-	informerFactory.Start(ctx.Done())
-
-	go c.Run(ctx.Done())
-	time.Sleep(3 * time.Second)
-
-	namespaces, pods, nps := ctesting.GenControllerTestInputs(client)
-
-	// ddlogProgram.StartRecordingCommands("/tmp/cmds.txt")
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		ctesting.CreateControllerTestInputs(b, client, namespaces, pods, nps)
-
-		for len(networkPolicyStore.List()) != len(nps) {
-			time.Sleep(10 * time.Millisecond)
-		}
-
-		ctesting.DumpMemStats("/tmp/ddlog-mem.txt")
-
-		ctesting.DeleteControllerTestInputs(b, client, namespaces, pods, nps)
-
-		for len(networkPolicyStore.List()) != 0 {
-			time.Sleep(10 * time.Millisecond)
-		}
-
-		ctesting.DumpMemStats("/tmp/ddlog-mem-end.txt")
-	}
-
-	b.StopTimer()
-
-	time.Sleep(1 * time.Second)
-
-	cancel()
-
-	time.Sleep(3 * time.Second)
-}
-
-func BenchmarkDDlogController2(b *testing.B) {
-	ctx, cancel := context.WithCancel(context.Background())
-	// defer cancel()
-
-	// Create the fake client.
-	client := fake.NewSimpleClientset()
-
-	informerFactory := informers.NewSharedInformerFactory(client, 0)
-	podInformer := informerFactory.Core().V1().Pods()
-	namespaceInformer := informerFactory.Core().V1().Namespaces()
-	networkPolicyInformer := informerFactory.Networking().V1().NetworkPolicies()
-
-	handler := &outRecordHandler{
-		controller: nil,
-	}
-	// handler, _ := ddlog.NewOutRecordDumper("/tmp/out.txt")
-
-	ddlogProgram, err := ddlog.NewProgram(1, handler)
-	require.Nil(b, err)
-
-	addressGroupStore := store.NewAddressGroupStore()
-	appliedToGroupStore := store.NewAppliedToGroupStore()
-	networkPolicyStore := store.NewNetworkPolicyStore()
-
-	c := NewController(
-		client,
-		podInformer,
-		namespaceInformer,
-		networkPolicyInformer,
-		ddlogProgram,
-		addressGroupStore,
-		appliedToGroupStore,
-		networkPolicyStore,
-	)
-	handler.controller = c
-	c.podListerSynced = alwaysReady
-	c.namespaceListerSynced = alwaysReady
-	c.networkPolicyListerSynced = alwaysReady
-
-	// Make sure informers are running.
-	informerFactory.Start(ctx.Done())
-
-	go c.Run(ctx.Done())
-	time.Sleep(3 * time.Second)
-
-	namespaces, pods, nps := ctesting.GenControllerTestInputs2(client)
-
-	// ddlogProgram.StartRecordingCommands("/tmp/cmds.txt")
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		ctesting.CreateControllerTestInputs2(b, client, namespaces, pods, nps)
-
-		for {
-			now := time.Now()
-			if now.Sub(addressGroupStore.LastUpdate()) > 5*time.Second &&
-				now.Sub(appliedToGroupStore.LastUpdate()) > 5*time.Second &&
-				now.Sub(networkPolicyStore.LastUpdate()) > 5*time.Second {
-				break
-			}
-			fmt.Println("Waiting...")
-			time.Sleep(time.Second)
-		}
-
-		ctesting.DeleteControllerTestInputs2(b, client, namespaces, pods, nps)
-
-		for len(networkPolicyStore.List()) != 0 {
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-
-	b.StopTimer()
-
-	time.Sleep(1 * time.Second)
-
-	cancel()
-
-	time.Sleep(3 * time.Second)
-}
-
-func TestDDlogController(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	// defer cancel()
-
-	// Create the fake client.
-	client := fake.NewSimpleClientset()
-
+	client := fake.NewSimpleClientset(objects...)
 	informerFactory := informers.NewSharedInformerFactory(client, 0)
 	podInformer := informerFactory.Core().V1().Pods()
 	namespaceInformer := informerFactory.Core().V1().Namespaces()
@@ -224,40 +65,106 @@ func TestDDlogController(t *testing.T) {
 	c.namespaceListerSynced = alwaysReady
 	c.networkPolicyListerSynced = alwaysReady
 
-	// Make sure informers are running.
-	informerFactory.Start(ctx.Done())
-
-	go c.Run(ctx.Done())
-	time.Sleep(3 * time.Second)
-
-	namespaces, pods, nps := ctesting.GenControllerTestInputs(client)
+	mostRecentUpdate := func() time.Time {
+		t1 := addressGroupStore.LastUpdate()
+		t2 := appliedToGroupStore.LastUpdate()
+		t3 := networkPolicyStore.LastUpdate()
+		return ctesting.MostRecentTime(t1, t2, t3)
+	}
 
 	// ddlogProgram.StartRecordingCommands("/tmp/cmds.txt")
 
-	for i := 0; i < 3; i++ {
-		fmt.Printf("Loop %v\n", i)
-		ctesting.CreateControllerTestInputs(t, client, namespaces, pods, nps)
-
-		for len(networkPolicyStore.List()) != len(nps) {
-			time.Sleep(10 * time.Millisecond)
+	start := time.Now()
+	// Make sure informers are running.
+	informerFactory.Start(ctx.Done())
+	go c.Run(ctx.Done())
+	for {
+		now := time.Now()
+		if now.Sub(mostRecentUpdate()) > 5*time.Second {
+			break
 		}
-
-		ctesting.DeleteControllerTestInputs(t, client, namespaces, pods, nps)
-
-		for len(networkPolicyStore.List()) != 0 {
-			time.Sleep(10 * time.Millisecond)
-		}
+		fmt.Println("Waiting...")
+		fmt.Printf(
+			"AddressGroups: %v - AppliedToGroups: %v - NetworkPolicies: %v\n",
+			len(addressGroupStore.List()), len(appliedToGroupStore.List()), len(networkPolicyStore.List()),
+		)
+		time.Sleep(time.Second)
 	}
+	end := mostRecentUpdate()
+	fmt.Printf("Computation time: %v\n", end.Sub(start))
+}
 
-	time.Sleep(1 * time.Second)
+func TestPerf1(t *testing.T) {
+	namespaces, pods, nps := ctesting.GenControllerTestInputs()
+	objs := make([]runtime.Object, 0, len(namespaces)+len(pods)+len(nps))
+	for i := range namespaces {
+		objs = append(objs, namespaces[i])
+	}
+	for i := range pods {
+		objs = append(objs, pods[i])
+	}
+	for i := range nps {
+		objs = append(objs, nps[i])
+	}
+	testDataset(t, objs...)
+}
 
-	cancel()
+func TestPerf2(t *testing.T) {
+	namespaces, pods, nps := ctesting.GenControllerTestInputs2()
+	objs := make([]runtime.Object, 0, len(namespaces)+len(pods)+len(nps))
+	for i := range namespaces {
+		objs = append(objs, namespaces[i])
+	}
+	for i := range nps {
+		objs = append(objs, nps[i])
+	}
+	for i := range pods {
+		objs = append(objs, pods[i])
+	}
+	testDataset(t, objs...)
+}
 
-	time.Sleep(3 * time.Second)
+func TestPerf3(t *testing.T) {
+	namespaces, pods, nps := ctesting.GenControllerTestInputs3()
+	objs := make([]runtime.Object, 0, len(namespaces)+len(pods)+len(nps))
+	for i := range namespaces {
+		objs = append(objs, namespaces[i])
+	}
+	for i := range nps {
+		objs = append(objs, nps[i])
+	}
+	for i := range pods {
+		objs = append(objs, pods[i])
+	}
+	testDataset(t, objs...)
+}
 
-	require.Equal(t, 0, len(networkPolicyStore.List()))
-	require.Equal(t, 0, len(addressGroupStore.List()))
-	require.Equal(t, 0, len(appliedToGroupStore.List()))
+func TestPerf4(t *testing.T) {
+	namespaces, pods, nps := ctesting.GenControllerTestInputs4()
+	objs := make([]runtime.Object, 0, len(namespaces)+len(pods)+len(nps))
+	for i := range namespaces {
+		objs = append(objs, namespaces[i])
+	}
+	for i := range nps {
+		objs = append(objs, nps[i])
+	}
+	for i := range pods {
+		objs = append(objs, pods[i])
+	}
+	testDataset(t, objs...)
+}
 
-	ddlogProgram.Stop()
+func TestPerf5(t *testing.T) {
+	namespaces, pods, nps := ctesting.GenControllerTestInputs5()
+	objs := make([]runtime.Object, 0, len(namespaces)+len(pods)+len(nps))
+	for i := range namespaces {
+		objs = append(objs, namespaces[i])
+	}
+	for i := range nps {
+		objs = append(objs, nps[i])
+	}
+	for i := range pods {
+		objs = append(objs, pods[i])
+	}
+	testDataset(t, objs...)
 }

@@ -18,15 +18,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"reflect"
-	"runtime"
-	"runtime/pprof"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1924,12 +1920,12 @@ func getPod(name, ns, nodeName, podIP string) *v1.Pod {
 	}
 }
 
-func BenchmarkController1(b *testing.B) {
+func testDataset(t *testing.T, objects ...k8sruntime.Object) {
 	ctx, cancel := context.WithCancel(context.Background())
-	// defer cancel()
+	defer cancel()
 
 	// Create the fake client.
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset(objects...)
 
 	informerFactory := informers.NewSharedInformerFactory(client, 0)
 	podInformer := informerFactory.Core().V1().Pods()
@@ -1953,196 +1949,104 @@ func BenchmarkController1(b *testing.B) {
 	c.namespaceListerSynced = alwaysReady
 	c.networkPolicyListerSynced = alwaysReady
 
-	// Make sure informers are running.
-	informerFactory.Start(ctx.Done())
-
-	go c.Run(ctx.Done())
-	time.Sleep(3 * time.Second)
-
-	namespaces, pods, nps := ctesting.GenControllerTestInputs(client)
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		ctesting.CreateControllerTestInputs(b, client, namespaces, pods, nps)
-
-		for len(networkPolicyStore.List()) != len(nps) {
-			time.Sleep(10 * time.Millisecond)
-		}
-
-		ctesting.DumpMemStats("/tmp/native-mem.txt")
-
-		ctesting.DeleteControllerTestInputs(b, client, namespaces, pods, nps)
-
-		for len(networkPolicyStore.List()) != 0 {
-			time.Sleep(10 * time.Millisecond)
-		}
-
-		ctesting.DumpMemStats("/tmp/native-mem-end.txt")
+	mostRecentUpdate := func() time.Time {
+		t1 := addressGroupStore.LastUpdate()
+		t2 := appliedToGroupStore.LastUpdate()
+		t3 := networkPolicyStore.LastUpdate()
+		return ctesting.MostRecentTime(t1, t2, t3)
 	}
 
-	b.StopTimer()
-
-	time.Sleep(1 * time.Second)
-
-	cancel()
-
-	time.Sleep(3 * time.Second)
+	start := time.Now()
+	// Make sure informers are running.
+	informerFactory.Start(ctx.Done())
+	go c.Run(ctx.Done())
+	for {
+		now := time.Now()
+		if now.Sub(mostRecentUpdate()) > 5*time.Second {
+			break
+		}
+		fmt.Println("Waiting...")
+		fmt.Printf(
+			"AddressGroups: %v - AppliedToGroups: %v - NetworkPolicies: %v\n",
+			len(addressGroupStore.List()), len(appliedToGroupStore.List()), len(networkPolicyStore.List()),
+		)
+		time.Sleep(time.Second)
+	}
+	end := mostRecentUpdate()
+	fmt.Printf("Computation time: %v\n", end.Sub(start))
 }
 
-func BenchmarkController2(b *testing.B) {
-	ctx, cancel := context.WithCancel(context.Background())
-	// defer cancel()
-
-	// Create the fake client.
-	client := fake.NewSimpleClientset()
-
-	informerFactory := informers.NewSharedInformerFactory(client, 0)
-	podInformer := informerFactory.Core().V1().Pods()
-	namespaceInformer := informerFactory.Core().V1().Namespaces()
-	networkPolicyInformer := informerFactory.Networking().V1().NetworkPolicies()
-
-	addressGroupStore := store.NewAddressGroupStore()
-	appliedToGroupStore := store.NewAppliedToGroupStore()
-	networkPolicyStore := store.NewNetworkPolicyStore()
-
-	c := NewNetworkPolicyController(
-		client,
-		podInformer,
-		namespaceInformer,
-		networkPolicyInformer,
-		addressGroupStore,
-		appliedToGroupStore,
-		networkPolicyStore,
-	)
-	c.podListerSynced = alwaysReady
-	c.namespaceListerSynced = alwaysReady
-	c.networkPolicyListerSynced = alwaysReady
-
-	// Make sure informers are running.
-	informerFactory.Start(ctx.Done())
-
-	go c.Run(ctx.Done())
-	time.Sleep(3 * time.Second)
-
-	namespaces, pods, nps := ctesting.GenControllerTestInputs2(client)
-
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		ctesting.CreateControllerTestInputs2(b, client, namespaces, pods, nps)
-
-		for {
-			now := time.Now()
-			if now.Sub(addressGroupStore.LastUpdate()) > 5*time.Second &&
-				now.Sub(appliedToGroupStore.LastUpdate()) > 5*time.Second &&
-				now.Sub(networkPolicyStore.LastUpdate()) > 5*time.Second {
-				break
-			}
-			fmt.Println("Waiting...")
-			time.Sleep(time.Second)
-		}
-
-		ctesting.DeleteControllerTestInputs2(b, client, namespaces, pods, nps)
-
-		for len(networkPolicyStore.List()) != 0 {
-			time.Sleep(10 * time.Millisecond)
-		}
+func TestPerf1(t *testing.T) {
+	namespaces, pods, nps := ctesting.GenControllerTestInputs()
+	objs := make([]k8sruntime.Object, 0, len(namespaces)+len(pods)+len(nps))
+	for i := range namespaces {
+		objs = append(objs, namespaces[i])
 	}
-
-	b.StopTimer()
-
-	time.Sleep(1 * time.Second)
-
-	cancel()
-
-	time.Sleep(3 * time.Second)
+	for i := range pods {
+		objs = append(objs, pods[i])
+	}
+	for i := range nps {
+		objs = append(objs, nps[i])
+	}
+	testDataset(t, objs...)
 }
 
-func TestController(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	// defer cancel()
-
-	// Create the fake client.
-	client := fake.NewSimpleClientset()
-
-	informerFactory := informers.NewSharedInformerFactory(client, 0)
-	podInformer := informerFactory.Core().V1().Pods()
-	namespaceInformer := informerFactory.Core().V1().Namespaces()
-	networkPolicyInformer := informerFactory.Networking().V1().NetworkPolicies()
-
-	addressGroupStore := store.NewAddressGroupStore()
-	appliedToGroupStore := store.NewAppliedToGroupStore()
-	networkPolicyStore := store.NewNetworkPolicyStore()
-
-	c := NewNetworkPolicyController(
-		client,
-		podInformer,
-		namespaceInformer,
-		networkPolicyInformer,
-		addressGroupStore,
-		appliedToGroupStore,
-		networkPolicyStore,
-	)
-	c.podListerSynced = alwaysReady
-	c.namespaceListerSynced = alwaysReady
-	c.networkPolicyListerSynced = alwaysReady
-
-	// Make sure informers are running.
-	informerFactory.Start(ctx.Done())
-
-	go c.Run(ctx.Done())
-	time.Sleep(3 * time.Second)
-
-	namespaces, pods, nps := ctesting.GenControllerTestInputs(client)
-
-	dumpMem := func(path string) {
-		fmt.Printf("Writing mem profile to %s\n", path)
-		f, err := os.Create(path)
-		if err != nil {
-			panic("could not create memory profile")
-		}
-		defer f.Close() // error handling omitted for example
-		runtime.GC()    // get up-to-date statistics
-		if err := pprof.WriteHeapProfile(f); err != nil {
-			panic("could not write memory profile")
-		}
+func TestPerf2(t *testing.T) {
+	namespaces, pods, nps := ctesting.GenControllerTestInputs2()
+	objs := make([]k8sruntime.Object, 0, len(namespaces)+len(pods)+len(nps))
+	for i := range namespaces {
+		objs = append(objs, namespaces[i])
 	}
-
-	for i := 0; i < 50; i++ {
-		fmt.Printf("Loop %v\n", i)
-		ctesting.CreateControllerTestInputs(t, client, namespaces, pods, nps)
-
-		for len(networkPolicyStore.List()) != len(nps) {
-			time.Sleep(10 * time.Millisecond)
-		}
-
-		dumpMem(fmt.Sprintf("/tmp/mem-%d-full.out", i))
-
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		fmt.Printf("%+v\n", m)
-
-		podsList, err := client.CoreV1().Pods("testNamespace").List(metav1.ListOptions{})
-		require.Nil(t, err)
-		require.Equal(t, 10000, len(podsList.Items))
-
-		ctesting.DeleteControllerTestInputs(t, client, namespaces, pods, nps)
-
-		for len(networkPolicyStore.List()) != 0 {
-			time.Sleep(10 * time.Millisecond)
-		}
-
-		dumpMem(fmt.Sprintf("/tmp/mem-%d-empty.out", i))
-
-		podsList, err = client.CoreV1().Pods("testNamespace").List(metav1.ListOptions{})
-		require.Nil(t, err)
-		require.Equal(t, 0, len(podsList.Items))
+	for i := range nps {
+		objs = append(objs, nps[i])
 	}
+	for i := range pods {
+		objs = append(objs, pods[i])
+	}
+	testDataset(t, objs...)
+}
 
-	time.Sleep(1 * time.Second)
+func TestPerf3(t *testing.T) {
+	namespaces, pods, nps := ctesting.GenControllerTestInputs3()
+	objs := make([]k8sruntime.Object, 0, len(namespaces)+len(pods)+len(nps))
+	for i := range namespaces {
+		objs = append(objs, namespaces[i])
+	}
+	for i := range nps {
+		objs = append(objs, nps[i])
+	}
+	for i := range pods {
+		objs = append(objs, pods[i])
+	}
+	testDataset(t, objs...)
+}
 
-	cancel()
+func TestPerf4(t *testing.T) {
+	namespaces, pods, nps := ctesting.GenControllerTestInputs4()
+	objs := make([]k8sruntime.Object, 0, len(namespaces)+len(pods)+len(nps))
+	for i := range namespaces {
+		objs = append(objs, namespaces[i])
+	}
+	for i := range nps {
+		objs = append(objs, nps[i])
+	}
+	for i := range pods {
+		objs = append(objs, pods[i])
+	}
+	testDataset(t, objs...)
+}
 
-	time.Sleep(3 * time.Second)
+func TestPerf5(t *testing.T) {
+	namespaces, pods, nps := ctesting.GenControllerTestInputs5()
+	objs := make([]k8sruntime.Object, 0, len(namespaces)+len(pods)+len(nps))
+	for i := range namespaces {
+		objs = append(objs, namespaces[i])
+	}
+	for i := range nps {
+		objs = append(objs, nps[i])
+	}
+	for i := range pods {
+		objs = append(objs, pods[i])
+	}
+	testDataset(t, objs...)
 }

@@ -56,7 +56,7 @@ const (
 
 	defaultInputWorkers = 1
 
-	maxUpdatesPerTransaction = 32
+	maxUpdatesPerTransaction = 128
 	maxTransactionDelay      = 100 * time.Millisecond
 )
 

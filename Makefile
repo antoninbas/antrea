@@ -105,13 +105,10 @@ antctl: $(ANTCTL_BINARIES)
 
 .PHONY: ddlog-test
 ddlog-test:
-	# $(GO) test -v -run=TestDDlogController github.com/vmware-tanzu/antrea/pkg/controller/ddlog -benchmem -memprofile ddlog-memprofile.out -cpuprofile ddlog-profile.out
-	$(GO) test -v -bench=BenchmarkDDlogController1 -run=XXX github.com/vmware-tanzu/antrea/pkg/controller/ddlog -benchmem -memprofile ddlog-memprofile.out -cpuprofile ddlog-profile.out
-
+	/usr/bin/time -v $(GO) test -v -run=TestPerf5 github.com/vmware-tanzu/antrea/pkg/controller/ddlog -benchmem -memprofile ddlog-memprofile.out -cpuprofile ddlog-profile.out
 .PHONY: native-test
 native-test:
-	# $(GO) test -v -run=TestController -timeout=2h github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy -benchmem -memprofile native-memprofile.out -cpuprofile native-profile.out
-	$(GO) test -v -bench=BenchmarkController1 -run=XXX github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy -benchmem -memprofile native-memprofile.out -cpuprofile native-profile.out
+	/usr/bin/time -v $(GO) test -v -run=TestPerf5 github.com/vmware-tanzu/antrea/pkg/controller/networkpolicy -benchmem -memprofile native-memprofile.out -cpuprofile native-profile.out
 
 .PHONY: ddlog-mem
 ddlog-mem:

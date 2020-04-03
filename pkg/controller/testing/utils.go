@@ -4,20 +4,18 @@ import (
 	"fmt"
 	"io/ioutil"
 	"runtime"
-	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-
+	"github.com/google/uuid"
 	"k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/apimachinery/pkg/util/rand"
 )
 
-func GenControllerTestInputs(client *fake.Clientset) (
+func GenControllerTestInputs() (
 	[]*v1.Namespace,
 	[]*v1.Pod,
 	[]*networkingv1.NetworkPolicy,
@@ -106,61 +104,7 @@ func GenControllerTestInputs(client *fake.Clientset) (
 	return []*v1.Namespace{ns}, pods, nps
 }
 
-func CreateControllerTestInputs(
-	t testing.TB,
-	client *fake.Clientset,
-	namespaces []*v1.Namespace,
-	pods []*v1.Pod,
-	nps []*networkingv1.NetworkPolicy,
-) {
-	for _, ns := range namespaces {
-		_, err := client.CoreV1().Namespaces().Create(ns)
-		require.Nil(t, err)
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	for _, pod := range pods {
-		_, err := client.CoreV1().Pods(pod.Namespace).Create(pod)
-		require.Nil(t, err)
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	for _, np := range nps {
-		_, err := client.NetworkingV1().NetworkPolicies(np.Namespace).Create(np)
-		require.Nil(t, err)
-		time.Sleep(1 * time.Millisecond)
-	}
-}
-
-func DeleteControllerTestInputs(
-	t testing.TB,
-	client *fake.Clientset,
-	namespaces []*v1.Namespace,
-	pods []*v1.Pod,
-	nps []*networkingv1.NetworkPolicy,
-) {
-	for _, np := range nps {
-		err := client.NetworkingV1().NetworkPolicies(np.Namespace).Delete(np.Name, &metav1.DeleteOptions{})
-		require.Nil(t, err)
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	for _, pod := range pods {
-		err := client.CoreV1().Pods(pod.Namespace).Delete(pod.Name, &metav1.DeleteOptions{})
-		require.Nil(t, err)
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	for _, ns := range namespaces {
-		err := client.CoreV1().Namespaces().Delete(ns.Name, &metav1.DeleteOptions{})
-		require.Nil(t, err)
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	client.ClearActions()
-}
-
-func GenControllerTestInputs2(client *fake.Clientset) (
+func GenControllerTestInputs2() (
 	[]*v1.Namespace,
 	[]*v1.Pod,
 	[]*networkingv1.NetworkPolicy,
@@ -172,7 +116,7 @@ func GenControllerTestInputs2(client *fake.Clientset) (
 		},
 	}
 
-	numNodes := 200
+	numNodes := 2000
 	numPodsPerNode := 50
 	numPods := numNodes * numPodsPerNode
 	pods := make([]*v1.Pod, numPods)
@@ -258,62 +202,265 @@ func GenControllerTestInputs2(client *fake.Clientset) (
 	return []*v1.Namespace{ns}, pods, nps
 }
 
-func CreateControllerTestInputs2(
-	t testing.TB,
-	client *fake.Clientset,
-	namespaces []*v1.Namespace,
-	pods []*v1.Pod,
-	nps []*networkingv1.NetworkPolicy,
+func GenControllerTestInputs3() (
+	[]*v1.Namespace,
+	[]*v1.Pod,
+	[]*networkingv1.NetworkPolicy,
 ) {
-	for _, ns := range namespaces {
-		_, err := client.CoreV1().Namespaces().Create(ns)
-		require.Nil(t, err)
-		time.Sleep(1 * time.Millisecond)
+	getObjects := func() ([]*v1.Namespace, []*networkingv1.NetworkPolicy, []*v1.Pod) {
+		namespace := rand.String(8)
+		namespaces := []*v1.Namespace{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: namespace, Labels: map[string]string{"app": namespace}},
+			},
+		}
+		networkPolicies := []*networkingv1.NetworkPolicy{
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "default-deny-all", UID: types.UID(uuid.New().String())},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{},
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "np-1", UID: types.UID(uuid.New().String())},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app-1": "scale-1"}},
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
+					Ingress: []networkingv1.NetworkPolicyIngressRule{
+						{
+							From: []networkingv1.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"app-1": "scale-1"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "np-2", UID: types.UID(uuid.New().String())},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app-2": "scale-2"}},
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
+					Ingress: []networkingv1.NetworkPolicyIngressRule{
+						{
+							From: []networkingv1.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"app-2": "scale-2"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		pods := []*v1.Pod{
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "pod1", UID: types.UID(uuid.New().String()), Labels: map[string]string{"app-1": "scale-1"}},
+				Spec:       v1.PodSpec{NodeName: getRandomNodeName()},
+				Status:     v1.PodStatus{PodIP: getRandomIP()},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "pod2", UID: types.UID(uuid.New().String()), Labels: map[string]string{"app-1": "scale-1"}},
+				Spec:       v1.PodSpec{NodeName: getRandomNodeName()},
+				Status:     v1.PodStatus{PodIP: getRandomIP()},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "pod3", UID: types.UID(uuid.New().String()), Labels: map[string]string{"app-2": "scale-2"}},
+				Spec:       v1.PodSpec{NodeName: getRandomNodeName()},
+				Status:     v1.PodStatus{PodIP: getRandomIP()},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "pod4", UID: types.UID(uuid.New().String()), Labels: map[string]string{"app-2": "scale-2"}},
+				Spec:       v1.PodSpec{NodeName: getRandomNodeName()},
+				Status:     v1.PodStatus{PodIP: getRandomIP()},
+			},
+		}
+		return namespaces, networkPolicies, pods
 	}
+	namespaces, nps, pods := getXObjects(25000, getObjects)
 
-	for _, np := range nps {
-		_, err := client.NetworkingV1().NetworkPolicies(np.Namespace).Create(np)
-		require.Nil(t, err)
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	for _, pod := range pods {
-		_, err := client.CoreV1().Pods(pod.Namespace).Create(pod)
-		require.Nil(t, err)
-		time.Sleep(1 * time.Millisecond)
-	}
+	return namespaces, pods, nps
 }
 
-func DeleteControllerTestInputs2(
-	t testing.TB,
-	client *fake.Clientset,
-	namespaces []*v1.Namespace,
-	pods []*v1.Pod,
-	nps []*networkingv1.NetworkPolicy,
+func GenControllerTestInputs4() (
+	[]*v1.Namespace,
+	[]*v1.Pod,
+	[]*networkingv1.NetworkPolicy,
 ) {
-	for _, pod := range pods {
-		err := client.CoreV1().Pods(pod.Namespace).Delete(pod.Name, &metav1.DeleteOptions{})
-		require.Nil(t, err)
-		time.Sleep(1 * time.Millisecond)
+	getObjects := func() ([]*v1.Namespace, []*networkingv1.NetworkPolicy, []*v1.Pod) {
+		namespace := rand.String(8)
+		namespaces := []*v1.Namespace{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: namespace, Labels: map[string]string{"app": namespace}},
+			},
+		}
+		networkPolicies := []*networkingv1.NetworkPolicy{
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "default-deny-all", UID: types.UID(uuid.New().String())},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{},
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "np-1", UID: types.UID(uuid.New().String())},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app-1": "scale-1"}},
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
+					Ingress: []networkingv1.NetworkPolicyIngressRule{
+						{
+							From: []networkingv1.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"app-1": "scale-1"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "np-2", UID: types.UID(uuid.New().String())},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app-2": "scale-2"}},
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
+					Ingress: []networkingv1.NetworkPolicyIngressRule{
+						{
+							From: []networkingv1.NetworkPolicyPeer{
+								{
+									PodSelector: &metav1.LabelSelector{
+										MatchLabels: map[string]string{"app-2": "scale-2"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		pods := make([]*v1.Pod, 0, 64)
+		podIdx := 0
+		for i := 0; i < 32; i++ {
+			pod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: fmt.Sprintf("pod-%d", podIdx), UID: types.UID(uuid.New().String()), Labels: map[string]string{"app-1": "scale-1"}},
+				Spec:       v1.PodSpec{NodeName: getRandomNodeName()},
+				Status:     v1.PodStatus{PodIP: getRandomIP()},
+			}
+			pods = append(pods, pod)
+			podIdx++
+		}
+		for i := 0; i < 32; i++ {
+			pod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: fmt.Sprintf("pod-%d", podIdx), UID: types.UID(uuid.New().String()), Labels: map[string]string{"app-2": "scale-2"}},
+				Spec:       v1.PodSpec{NodeName: getRandomNodeName()},
+				Status:     v1.PodStatus{PodIP: getRandomIP()},
+			}
+			pods = append(pods, pod)
+			podIdx++
+		}
+		return namespaces, networkPolicies, pods
 	}
+	namespaces, nps, pods := getXObjects(5000, getObjects)
 
-	for _, np := range nps {
-		err := client.NetworkingV1().NetworkPolicies(np.Namespace).Delete(np.Name, &metav1.DeleteOptions{})
-		require.Nil(t, err)
-		time.Sleep(1 * time.Millisecond)
+	return namespaces, pods, nps
+}
+
+func GenControllerTestInputs5() (
+	[]*v1.Namespace,
+	[]*v1.Pod,
+	[]*networkingv1.NetworkPolicy,
+) {
+	getObjects := func() ([]*v1.Namespace, []*networkingv1.NetworkPolicy, []*v1.Pod) {
+		namespace := rand.String(8)
+		namespaces := []*v1.Namespace{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: namespace, Labels: map[string]string{"app": namespace}},
+			},
+		}
+		networkPolicies := []*networkingv1.NetworkPolicy{
+			{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "np-1", UID: types.UID(uuid.New().String())},
+				Spec: networkingv1.NetworkPolicySpec{
+					PodSelector: metav1.LabelSelector{},
+					PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
+					Ingress: []networkingv1.NetworkPolicyIngressRule{
+						{
+							From: []networkingv1.NetworkPolicyPeer{
+								{
+									NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": namespace}},
+								},
+							},
+						},
+					},
+					Egress: []networkingv1.NetworkPolicyEgressRule{
+						{
+							To: []networkingv1.NetworkPolicyPeer{
+								{
+									NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": namespace}},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		pods := make([]*v1.Pod, 0, 32)
+		for i := 0; i < 32; i++ {
+			pod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: fmt.Sprintf("pod-%d", i), UID: types.UID(uuid.New().String()), Labels: map[string]string{}},
+				Spec:       v1.PodSpec{NodeName: getRandomNodeName()},
+				Status:     v1.PodStatus{PodIP: getRandomIP()},
+			}
+			pods = append(pods, pod)
+		}
+		return namespaces, networkPolicies, pods
 	}
+	namespaces, nps, pods := getXObjects(1000, getObjects)
 
-	for _, ns := range namespaces {
-		err := client.CoreV1().Namespaces().Delete(ns.Name, &metav1.DeleteOptions{})
-		require.Nil(t, err)
-		time.Sleep(1 * time.Millisecond)
-	}
-
-	client.ClearActions()
+	return namespaces, pods, nps
 }
 
 func DumpMemStats(path string) error {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	return ioutil.WriteFile(path, []byte(fmt.Sprintf("%+v\n", m)), 0644)
+}
+
+func MostRecentTime(times ...time.Time) time.Time {
+	var m time.Time
+	for _, t := range times {
+		if t.After(m) {
+			m = t
+		}
+	}
+	return m
+}
+
+func getRandomIP() string {
+	return fmt.Sprintf("%d.%d.%d.%d", rand.Intn(256), rand.Intn(256), rand.Intn(256), rand.Intn(256))
+}
+
+func getRandomNodeName() string {
+	return fmt.Sprintf("Node-%d", rand.Intn(1000))
+}
+
+// getXObjects calls the provided getObjectsFunc x times and aggregate the objects.
+func getXObjects(x int, getObjectsFunc func() ([]*v1.Namespace, []*networkingv1.NetworkPolicy, []*v1.Pod)) ([]*v1.Namespace, []*networkingv1.NetworkPolicy, []*v1.Pod) {
+	var namespaces []*v1.Namespace
+	var networkPolicies []*networkingv1.NetworkPolicy
+	var pods []*v1.Pod
+	for i := 0; i < x; i++ {
+		newNamespaces, newNetworkPolicies, newPods := getObjectsFunc()
+		namespaces = append(namespaces, newNamespaces...)
+		networkPolicies = append(networkPolicies, newNetworkPolicies...)
+		pods = append(pods, newPods...)
+	}
+	return namespaces, networkPolicies, pods
 }
