@@ -472,14 +472,14 @@ func (c *Controller) handleAppliedToGroupDescr(record ddlog.Record, polarity ddl
 		klog.Errorf("Record is not a struct")
 		return
 	}
-	name := r.At(1).ToString() // name is the key
+	name := r.At(0).ToString() // name is the key
 	// relies on the knowledge that the uid is the same as the name (but uid
 	// is a u128 while we need a string, so by using name we avoid a
 	// conversion)
 	uid := types.UID(name)
 	update, appliedToGroup := c.getAppliedToGroupUpdate(name, uid)
 
-	appliedToGroup.Selector = *toGroupSelector(r.At(3))
+	appliedToGroup.Selector = *toGroupSelector(r.At(1))
 	if polarity == ddlog.OutPolarityInsert {
 		update.insertCnt++
 	} else {
@@ -559,14 +559,14 @@ func (c *Controller) handleAddressGroupDescr(record ddlog.Record, polarity ddlog
 		klog.Errorf("Record is not a struct")
 		return
 	}
-	name := r.At(1).ToString() // name is the key
+	name := r.At(0).ToString() // name is the key
 	// relies on the knowledge that the uid is the same as the name (but uid
 	// is a u128 while we need a string, so by using name we avoid a
 	// conversion)
 	uid := types.UID(name)
 	update, addressGroup := c.getAddressGroupUpdate(name, uid)
 
-	addressGroup.Selector = *toGroupSelector(r.At(3))
+	addressGroup.Selector = *toGroupSelector(r.At(1))
 	if polarity == ddlog.OutPolarityInsert {
 		update.insertCnt++
 	} else {
