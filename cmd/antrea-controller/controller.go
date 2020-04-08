@@ -105,12 +105,12 @@ func run(o *Options) error {
 
 	ddlogProgram, err := ddlog.NewProgram(1, handler)
 	if err != nil {
-		klog.Fatalf("Error when creating DDLog program: %v", err)
+		klog.Fatalf("Error when creating DDlog program: %v", err)
 	}
 	defer func() {
-		klog.Infof("Stopping DDLog program")
+		klog.Infof("Stopping DDlog program")
 		if err := ddlogProgram.Stop(); err != nil {
-			klog.Errorf("Error when stopping DDLog program: %v", err)
+			klog.Errorf("Error when stopping DDlog program: %v", err)
 		}
 	}()
 

@@ -345,9 +345,9 @@ func GenControllerTestInputs4() (
 				},
 			},
 		}
-		pods := make([]*v1.Pod, 0, 64)
+		pods := make([]*v1.Pod, 0, 50)
 		podIdx := 0
-		for i := 0; i < 32; i++ {
+		for i := 0; i < 25; i++ {
 			pod := &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: fmt.Sprintf("pod-%d", podIdx), UID: types.UID(uuid.New().String()), Labels: map[string]string{"app-1": "scale-1"}},
 				Spec:       v1.PodSpec{NodeName: getRandomNodeName()},
@@ -356,7 +356,7 @@ func GenControllerTestInputs4() (
 			pods = append(pods, pod)
 			podIdx++
 		}
-		for i := 0; i < 32; i++ {
+		for i := 0; i < 25; i++ {
 			pod := &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: fmt.Sprintf("pod-%d", podIdx), UID: types.UID(uuid.New().String()), Labels: map[string]string{"app-2": "scale-2"}},
 				Spec:       v1.PodSpec{NodeName: getRandomNodeName()},
@@ -411,8 +411,8 @@ func GenControllerTestInputs5() (
 				},
 			},
 		}
-		pods := make([]*v1.Pod, 0, 32)
-		for i := 0; i < 32; i++ {
+		pods := make([]*v1.Pod, 0, 25)
+		for i := 0; i < 25; i++ {
 			pod := &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: fmt.Sprintf("pod-%d", i), UID: types.UID(uuid.New().String()), Labels: map[string]string{}},
 				Spec:       v1.PodSpec{NodeName: getRandomNodeName()},
@@ -463,4 +463,8 @@ func getXObjects(x int, getObjectsFunc func() ([]*v1.Namespace, []*networkingv1.
 		pods = append(pods, newPods...)
 	}
 	return namespaces, networkPolicies, pods
+}
+
+func init() {
+	rand.Seed(1234)
 }

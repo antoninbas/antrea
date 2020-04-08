@@ -739,7 +739,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	}
 	klog.Info("Caches are synced for controller")
 
-	// one worker is in charge of all the transactions since DDLog does not support concurrent
+	// one worker is in charge of all the transactions since DDlog does not support concurrent
 	// transactions
 	go c.generateTransactions(stopCh)
 
@@ -752,7 +752,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	<-stopCh
 }
 
-// We assume that there cannot be transient issues with DDLog transactions, and so there is no point
+// We assume that there cannot be transient issues with DDlog transactions, and so there is no point
 // in retrying.
 func (c *Controller) generateTransactions(stopCh <-chan struct{}) {
 	transactionSize := 0
@@ -767,7 +767,7 @@ func (c *Controller) generateTransactions(stopCh <-chan struct{}) {
 		ctx = parentCxt
 		c.StartRecordOut()
 		if err := c.ddlogProgram.CommitTransaction(); err != nil {
-			klog.Errorf("Error when committing DDLog transaction: %v", err)
+			klog.Errorf("Error when committing DDlog transaction: %v", err)
 		}
 		c.EndRecordOut()
 	}
@@ -777,14 +777,14 @@ func (c *Controller) generateTransactions(stopCh <-chan struct{}) {
 		if transactionSize == 0 {
 			// start transaction
 			if err := c.ddlogProgram.StartTransaction(); err != nil {
-				klog.Errorf("Error when starting DDLog transaction: %v", err)
+				klog.Errorf("Error when starting DDlog transaction: %v", err)
 				return
 			}
 			ctx, cancel = context.WithTimeout(parentCxt, maxTransactionDelay)
 		}
 		// add to transaction
 		if err := c.ddlogProgram.ApplyUpdates(cmd); err != nil {
-			klog.Errorf("Error when applying updates with DDLog: %v", err)
+			klog.Errorf("Error when applying updates with DDlog: %v", err)
 			return
 		}
 		transactionSize++
