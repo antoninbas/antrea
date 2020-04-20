@@ -75,6 +75,9 @@ done
 
 DOCKER_IMAGES+=("antrea/antrea-ubuntu:latest")
 
+docker images
+df -h
+
 echo "Creating Kind cluster"
 IMAGES="${DOCKER_IMAGES[@]}"
 $THIS_DIR/kind-setup.sh create kind --antrea-cni false --images "$IMAGES"
