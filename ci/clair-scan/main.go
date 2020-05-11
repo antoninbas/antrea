@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	defaultMaxScore = 1500
+	defaultMaxScore = 500
 )
 
 func parseReport(jsonPath string) (*vulnerabilityReport, error) {

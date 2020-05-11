@@ -1,13 +1,13 @@
 name: Scan Antrea Docker image for vulnerabilities every day
 
 on:
-  schedule:
-    # every day at 10am
-    - cron: '0 10 * * *'
+  push:
+    branches:
+      - scan-latest-antrea-docker-image-for-vulnerabilities-test
 
 jobs:
   build:
-    if: github.repository == 'vmware-tanzu/antrea'
+    if: github.repository != 'vmware-tanzu/antrea'
     runs-on: [ubuntu-18.04]
     steps:
     - uses: actions/checkout@v2
@@ -21,10 +21,3 @@ jobs:
       run: |
         cd ci/clair-scan
         ./run.sh
-  skip:
-    if: github.repository != 'vmware-tanzu/antrea'
-    runs-on: [ubuntu-18.04]
-    steps:
-      - name: Skip
-        run: |
-          echo "Skipping image scan because workflow cannot be run from fork"
