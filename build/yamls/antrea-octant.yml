@@ -49,7 +49,7 @@ spec:
         - name: OCTANT_DISABLE_OPEN_BROWSER
           value: "true"
         - name: KUBECONFIG
-          value: /kube/admin.conf
+          value: /kube/config
         image: antrea/octant-antrea-ubuntu:latest
         imagePullPolicy: IfNotPresent
         name: antrea-octant
