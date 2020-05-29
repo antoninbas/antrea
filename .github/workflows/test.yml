@@ -1,13 +1,37 @@
-on: push
+on:
+  push:
+    branches:
+      - test-ci
 
 jobs:
-  one:
-    runs-on: ubuntu-18.04
+  build-windows:
+    runs-on: [windows-2019]
     steps:
-      - name: Dump GitHub context
-        env:
-          GITHUB_CONTEXT: ${{ toJson(github) }}
-        run: echo "$GITHUB_CONTEXT"
-      - name: AAAA
-        if: ${{ github.repository == 'antoninbas/antrea' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
-        run: echo "YEAH!"
+    - uses: actions/checkout@v2
+    - name: Build Antrea Windows Docker image
+      run: make build-windows
+    - name: Push Antrea Windows Docker image to registry
+      env:
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      run: |
+        echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+        docker tag antrea/antrea-windows:latest antoninbas/antrea-windows:latest
+        docker push antrea/antrea-windows:latest
+      shell: bash
+  build-windows-2:
+    runs-on: [windows-2019]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build Antrea Windows Docker image and push to registry
+      env:
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        TAG: "refs/tags/v0.99.0"
+      run: |
+        export VERSION="${TAG:10}"
+        make build-windows
+        echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+        docker tag antrea/antrea-windows:"${TAG:10}" antoninbas/antrea-windows:"${TAG:10}"
+        docker push antoninbas/antrea-windows:"${TAG:10}"
+      shell: bash
