@@ -1,0 +1,13 @@
+on: push
+
+jobs:
+  one:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Dump GitHub context
+        env:
+          GITHUB_CONTEXT: ${{ toJson(github) }}
+        run: echo "$GITHUB_CONTEXT"
+      - name: AAAA
+        if: ${{ github.repository == 'antoninbas/antrea' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+        run: echo "YEAH!"
