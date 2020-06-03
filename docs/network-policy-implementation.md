@@ -4,7 +4,23 @@
 
 ![Antrea NP overview](/docs/assets/antrea-np-overview.png)
 
-Antrea uses a centralized controller (Antrea Controller) ...
+Antrea uses a centralized controller (Antrea Controller) which connects to the
+k8s apiserver and watches the k8s NetworkPolicies. The Controller then performs
+"policy computation", during which the k8s NetworkPolicies are converted to
+internal, Antrea-specific, objects which are then distributed (through an
+apiserver instance) to the Antrea Agents running on the Nodes. By using a
+centralized controller, we avoid overloading the k8s apiserver (by not having
+all Agents connect to it individually). We also avoid duplicating computation
+tasks across all Agents. By ensuring that each Agent only receives the
+information relevant to the Pods running locally on its Node and using
+incremental messages when possible, we reduce communication overhead and
+simplify the computation logic at each Agent.
+
+This documents describes the different steps of:
+
+1. NetworkPolicy computation at the Controller
+2. Selective distribution of computed rules from the Controller to the Agents
+3. Local enforcement of computed rules at the Agents by programming OVS
 
 ## An end-to-end overview of the implementation
 
@@ -77,6 +93,32 @@ Antrea uses a centralized controller (Antrea Controller) ...
    distinct NetworkPolicy rules apply to the same 
 
 ## NetworkPolicy computation in the Controller
+
+The Antrea Controller translates k8s resource (Namespaces, Pods,
+NetworkPolicies) to internal objects, defined
+[here](https://github.com/vmware-tanzu/antrea/blob/master/pkg/controller/types/networkpolicy.go). We
+define 3 top-level objects:
+
+ * `AddressGroup` describes a set of Pods used as source or destination for one
+   or more NetworkPolicy rules. Each member of the set includes a Pod reference
+   (`namespace/name`), the IPv4 address of the Pod and the "named port" mapping
+   (i.e. which name corresponds to which numerical value) for the Pod (as
+   obtained from the Pod specification).
+* `AppliedToGroup` describes a set of Pods to which one or more NetworkPolicy is
+   applied. In practice, this "set" is actually a map from each Node name to the
+   subset of Pods running on that Node (when distributing the object to an
+   Agent, this enables restricting the information to the Pods running locally
+   on that Agent's Node). Each subet of Pods includes the same information (Pod
+   reference, IP address and "named port" mapping) as for `AddressGroup`.
+* `NetworkPolicy` maps directly to a K8s NetworkPolicy resource, but replaces
+   the different Pod Selectors and Namespace Selectors with references (by name)
+   the computed `AddressGroup` and `AppliedToGroup` objects. IPBlocks are
+   preserved as they are. This object is often referred to as an "internal"
+   NetworkPolicy to avoid confusion with the corresponding k8s resource.
+
+Note that when applicable, multiple `NetworkPolicies` can refer to the same
+`AppliedToGroups` (e.g., when the k8s NetworkPolicies apply to the same Pods) or
+the same `AddressGroups` (e.g., when multiple rules select the same Pods).
 
 ## Mapping NetworkPolicies to flows
 

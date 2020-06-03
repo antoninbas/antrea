@@ -245,6 +245,9 @@ NetworkPolicy implementation.
 As described earlier, Antrea Controller leverages the Kubernetes apiserver
 library to build the API and communication channel to Agents.
 
+For more information on NetworkPolicy computation and distribution, please refer
+to this [document](network-policy-implementation.md).
+
 ### IPsec encryption
 
 Antrea supports encrypting GRE tunnel traffic with IPsec ESP. The IPsec
