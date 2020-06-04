@@ -104,7 +104,7 @@ spec:
             initialDelaySeconds: 5
             timeoutSeconds: 5
             periodSeconds: 10
-            failureThreshold: 5
+            failureThreshold: 10
           securityContext:
             # antrea-agent needs to manipulate "/proc/sys/net/ipv4/conf/XXX/send_redirects".
             privileged: true

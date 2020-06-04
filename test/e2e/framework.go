@@ -275,7 +275,7 @@ func (data *TestData) deployAntreaCommon(yamlFile string, extraOptions string) e
 	if err != nil || rc != 0 {
 		return fmt.Errorf("error when deploying Antrea; is %s available on the master Node?", yamlFile)
 	}
-	rc, _, _, err = provider.RunCommandOnNode(masterNodeName(), fmt.Sprintf("kubectl -n %s rollout status ds/%s --timeout=%v", antreaNamespace, antreaDaemonSet, defaultTimeout))
+	rc, _, _, err = provider.RunCommandOnNode(masterNodeName(), fmt.Sprintf("kubectl -n %s rollout status ds/%s --timeout=%v", antreaNamespace, antreaDaemonSet, 45*time.Second))
 	if err != nil || rc != 0 {
 		return fmt.Errorf("error when waiting for Antrea rollout to complete")
 	}

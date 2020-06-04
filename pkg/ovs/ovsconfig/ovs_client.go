@@ -147,6 +147,7 @@ func (br *OVSBridge) updateBridgeConfiguration() Error {
 			"protocols": makeOVSDBSetFromList([]string{openflowProtoVersion10,
 				openflowProtoVersion13}),
 			"datapath_type": br.datapathType,
+			"fail_mode":     "secure",
 		},
 	})
 	_, err, temporary := tx.Commit()
@@ -165,6 +166,7 @@ func (br *OVSBridge) create() Error {
 		Protocols: makeOVSDBSetFromList([]string{openflowProtoVersion10,
 			openflowProtoVersion13}),
 		DatapathType: br.datapathType,
+		FailMode:     "secure",
 	}
 	namedUUID := tx.Insert(dbtransaction.Insert{
 		Table: "Bridge",

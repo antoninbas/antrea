@@ -50,6 +50,8 @@ const informerDefaultResync = 12 * time.Hour
 
 // run starts Antrea agent with the given options and waits for termination signal.
 func run(o *Options) error {
+	klog.Infof("Sleeping a bit")
+	time.Sleep(5 * time.Second)
 	klog.Infof("Starting Antrea agent (version %s)", version.GetFullVersion())
 	// Create K8s Clientset, CRD Clientset and SharedInformerFactory for the given config.
 	k8sClient, _, crdClient, err := k8s.CreateClients(o.config.ClientConnection)

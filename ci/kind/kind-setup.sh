@@ -74,6 +74,8 @@ function modify {
   docker run --net=host --privileged antrea/ethtool:latest ethtool -K "$peerName" tx off
   # Workaround for https://github.com/vmware-tanzu/antrea/issues/324
   docker exec "$node" sysctl -w net.ipv4.tcp_retries2=4
+  docker exec "$node" apt-get update
+  docker exec "$node" apt-get install -y net-tools tcpdump
 }
 
 function configure_networks {

@@ -94,6 +94,12 @@ $ROOT_DIR/hack/generate-manifest.sh --kind | docker exec -i kind-control-plane d
 rc=0
 go test -v -run=TestUpgrade github.com/vmware-tanzu/antrea/test/e2e -provider=kind -upgrade.toYML=antrea-new.yml || rc=$?
 
-$THIS_DIR/kind-setup.sh destroy kind
+kubectl get -A all -o wide
 
-exit $rc
+kubectl describe -n kube-system -l app=antrea pods
+
+kubectl -n kube-system logs -l component=antrea-agent --all-containers --tail 100
+
+# $THIS_DIR/kind-setup.sh destroy kind
+
+# exit $rc

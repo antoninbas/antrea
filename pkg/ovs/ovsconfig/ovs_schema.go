@@ -18,6 +18,7 @@ type Bridge struct {
 	Name         string        `json:"name"`
 	Protocols    []interface{} `json:"protocols,omitempty"`
 	DatapathType string        `json:"datapath_type,omitempty"`
+	FailMode     string        `json:"fail_mode,omitempty"`
 }
 
 type Port struct {
