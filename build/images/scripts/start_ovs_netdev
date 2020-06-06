@@ -35,7 +35,7 @@ function add_br_phy {
     ip addr flush dev eth0 2>/dev/null
     ip link set eth0 up
     ip route add default via "$gw" dev br-phy
-    ovs-appctl dpctl/flush-conntrack
+    conntrack -F
 }
 
 function del_br_phy {
