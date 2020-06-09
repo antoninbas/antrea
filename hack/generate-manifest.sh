@@ -235,9 +235,11 @@ if $KIND; then
 
     # add tun device to antrea OVS container
     $KUSTOMIZE edit add patch tunDevice.yml
-    # antrea-ovs should use start_ovs_netdev instead of start_ovs to ensure that the br_phy bridge
+    # antrea-ovs should use start_ovs_netdev instead of start_ovs to ensure that the br-phy bridge
     # is created.
     $KUSTOMIZE edit add patch startOvs.yml
+    # add a sleep statement before calling antrea-agent to make sure that br-phy has been created.
+    $KUSTOMIZE edit add patch startAgent.yml
     # change initContainer script and remove SYS_MODULE capability
     $KUSTOMIZE edit add patch installCni.yml
 
