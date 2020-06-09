@@ -7,11 +7,13 @@ spec:
     spec:
       containers:
       - name: antrea-agent
-        startupProbe:
+        livenessProbe:
+          exec:
           httpGet:
             host: 127.0.0.1
             path: /healthz
             port: api
-            scheme: HTTPS
-          periodSeconds: 5
+          periodSeconds: 3
           failureThreshold: 3
+          initialDelaySeconds: 5
+          timeoutSeconds: 3
