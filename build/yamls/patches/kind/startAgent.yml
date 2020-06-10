@@ -8,4 +8,4 @@ spec:
       containers:
       - name: antrea-agent
         command: ["/bin/sh"]
-        args: ["-c", "sleep 2; exec antrea-agent"]
+        args: ["-c", "sleep 2; exec antrea-agent --config /etc/antrea/antrea-agent.conf"]
