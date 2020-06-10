@@ -239,7 +239,7 @@ if $KIND; then
     # is created.
     $KUSTOMIZE edit add patch startOvs.yml
     # add a sleep statement before calling antrea-agent to make sure that br-phy has been created.
-    $KUSTOMIZE edit add patch startAgent.yml
+    # $KUSTOMIZE edit add patch startAgent.yml
     # change initContainer script and remove SYS_MODULE capability
     $KUSTOMIZE edit add patch installCni.yml
 
