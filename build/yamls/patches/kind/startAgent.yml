@@ -7,13 +7,5 @@ spec:
     spec:
       containers:
       - name: antrea-agent
-        livenessProbe:
-          exec:
-          httpGet:
-            host: 127.0.0.1
-            path: /healthz
-            port: api
-          periodSeconds: 3
-          failureThreshold: 3
-          initialDelaySeconds: 5
-          timeoutSeconds: 3
+        command: ["/bin/sh"]
+        args: ["-c", "sleep 2; exec antrea-agent"]
