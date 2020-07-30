@@ -22,6 +22,7 @@ import (
 
 	"github.com/vmware-tanzu/antrea/pkg/agent/flowexporter"
 	"github.com/vmware-tanzu/antrea/pkg/agent/interfacestore"
+	"github.com/vmware-tanzu/antrea/pkg/agent/metrics"
 	"github.com/vmware-tanzu/antrea/pkg/agent/openflow"
 )
 
@@ -131,5 +132,9 @@ func (cs *connectionStore) poll() (int, error) {
 	}
 	klog.V(2).Infof("Conntrack polling successful")
 
-	return len(filteredConns), nil
+	numConns := len(filteredConns)
+
+	metrics.ConnectionCount.Set(float64(numConns))
+
+	return numConns, nil
 }

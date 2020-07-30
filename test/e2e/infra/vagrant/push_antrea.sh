@@ -6,10 +6,15 @@ function usage() {
 
 # Process execution flags
 RUN_PROMETHEUS=false
+FLOW_EXPORTER=false
 for i in "$@"; do
     case $i in
         --prometheus)
             RUN_PROMETHEUS=true
+            shift
+            ;;
+        --flow-exporter)
+            FLOW_EXPORTER=true
             shift
             ;;
         -h|--help)
@@ -42,6 +47,10 @@ if [ "$RUN_PROMETHEUS" == "true" ]; then
     sed -i.bak -E 's|#enablePrometheusMetrics: false|enablePrometheusMetrics: true|g' "${ANTREA_YML}"
     echo "---" >> "${ANTREA_YML}"
     cat "${ANTREA_PROMETHEUS_YML}" >> "${ANTREA_YML}"
+fi
+
+if [ "$FLOW_EXPORTER" == "true" ]; then
+    sed -i.bak -E 's|#  FlowExporter: false|  FlowExporter: true|g' "${ANTREA_YML}"
 fi
 
 if [ ! -f ssh-config ]; then

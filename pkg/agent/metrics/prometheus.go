@@ -94,6 +94,14 @@ var (
 		},
 		[]string{"operation"},
 	)
+
+	ConnectionCount = metrics.NewGauge(
+		&metrics.GaugeOpts{
+			Name:           "antrea_agent_connection_count",
+			Help:           "Number of connections committed to conntrack by Antrea.",
+			StabilityLevel: metrics.ALPHA,
+		},
+	)
 )
 
 func InitializePrometheusMetrics() {
@@ -167,5 +175,8 @@ func InitializeOVSMetrics() {
 		OVSFlowOpsCount.WithLabelValues(ops)
 		OVSFlowOpsErrorCount.WithLabelValues(ops)
 		OVSFlowOpsLatency.WithLabelValues(ops)
+	}
+	if err := legacyregistry.Register(ConnectionCount); err != nil {
+		klog.Error("Failed to register antrea_agent_connection_count with Prometheus")
 	}
 }
