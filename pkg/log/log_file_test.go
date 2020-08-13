@@ -15,41 +15,41 @@
 package log
 
 import (
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
-	"k8s.io/component-base/logs"
+	klogv1 "k8s.io/klog"
 	"k8s.io/klog/v2"
 )
 
 const oneMB = 1 * 1024 * 1024
 
 var (
-	testFlags          = initFlags()
 	klogDefaultMaxSize = klog.MaxSize
 )
 
 func initFlags() *pflag.FlagSet {
 	flags := pflag.NewFlagSet("test", pflag.ContinueOnError)
 	AddFlags(flags)
-	flags.AddGoFlagSet(flag.CommandLine)
 	return flags
 }
 
-func restoreFlagDefaultValues() {
-	testFlags.Set(logToStdErrFlag, "true")
-	testFlags.Set(logFileFlag, "")
-	testFlags.Set(logDirFlag, "")
-	testFlags.Set(maxSizeFlag, fmt.Sprintf("%d", klogDefaultMaxSize/oneMB))
-	testFlags.Set(maxNumFlag, "0")
+func restoreEnvironment() {
+	Klogv2Flags.Set(logToStdErrFlag, "true")
+	Klogv2Flags.Set(logFileFlag, "")
+	Klogv2Flags.Set(logDirFlag, "")
+	Klogv2Flags.Set(maxSizeFlag, fmt.Sprintf("%d", klogDefaultMaxSize/oneMB))
+	Klogv2Flags.Set(maxNumFlag, "0")
 
 	klog.MaxSize = klogDefaultMaxSize
 	logFileMaxNum = 0
@@ -68,10 +68,12 @@ func testLogging() {
 		klog.Infof("%d: %s", i, string(line))
 		klog.Warningf("%d: %s", i, string(line))
 	}
-	logs.FlushLogs()
+	klog.Flush()
 }
 
 func TestKlogFileLimits(t *testing.T) {
+	defer restoreEnvironment()
+
 	testLogDir, err := ioutil.TempDir("", "antrea-log-test")
 	if err != nil {
 		t.Errorf("Failed to create tmp log dir: %v", err)
@@ -82,12 +84,10 @@ func TestKlogFileLimits(t *testing.T) {
 	testMaxNum := 2
 	args := []string{"--logtostderr=false", "--log_dir=" + testLogDir, "--log_file_max_size=1",
 		fmt.Sprintf("--log_file_max_num=%d", testMaxNum)}
-	InitKlog()
-	Klogv2Flags.Parse(args)
+	testFlags := initFlags()
 	testFlags.Parse(args)
 	InitLogFileLimits(testFlags)
-	logs.InitLogs()
-	defer restoreFlagDefaultValues()
+	// defer restoreFlagDefaultValues()
 
 	// Should generate about 5 log files (100K * 40 / 1M), though it is hard
 	// to accurately control log file size and number, because of log file
@@ -189,11 +189,58 @@ func TestFlags(t *testing.T) {
 	}
 
 	for _, test := range testcases {
-		testFlags.Parse(test.args)
-		InitLogFileLimits(testFlags)
-		assert.Equal(t, test.maxSize, klog.MaxSize, test.name)
-		assert.Equal(t, test.maxNum, logFileMaxNum, test.name)
-		assert.Equal(t, test.logDir, logDir, test.name)
-		restoreFlagDefaultValues()
+		t.Run(test.name, func(t *testing.T) {
+			defer restoreEnvironment()
+			testFlags := initFlags()
+			testFlags.Parse(test.args)
+			InitLogFileLimits(testFlags)
+			assert.Equal(t, test.maxSize, klog.MaxSize, test.name)
+			assert.Equal(t, test.maxNum, logFileMaxNum, test.name)
+			assert.Equal(t, test.logDir, logDir, test.name)
+		})
 	}
+}
+
+// TestKlogv1Redirect validates that piping of klov1 to klogv2 for legacy
+// dependencies is implemented correctly.
+func TestKlogv1Redirect(t *testing.T) {
+	defer restoreEnvironment()
+
+	testLogDir, err := ioutil.TempDir("", "antrea-log-test")
+	if err != nil {
+		t.Errorf("Failed to create tmp log dir: %v", err)
+		return
+	}
+	defer os.RemoveAll(testLogDir)
+
+	testMaxNum := 2
+	args := []string{"--logtostderr=false", "--log_dir=" + testLogDir, "--log_file_max_size=1",
+		fmt.Sprintf("--log_file_max_num=%d", testMaxNum)}
+	testFlags := initFlags()
+	setUpKlogV1Redirect() // this should not impact other tests
+	testFlags.Parse(args)
+
+	// test both Info and Infof as the call stack depth is different
+	klogv1.Info("INFO TEST")
+	klogv1.Infof("INFOF TEST %s", "Antrea")
+	klog.Flush()
+
+	time.Sleep(time.Second)
+	testLogFile := path.Join(testLogDir, "log.test.INFO")
+	files, err := ioutil.ReadDir(testLogDir)
+	require.NoError(t, err)
+
+	for _, file := range files {
+		fmt.Println(file.Name())
+	}
+	testLogContent, err := ioutil.ReadFile(testLogFile)
+	require.NoError(t, err, "Cannot read log file")
+
+	matched, err := regexp.Match(`log_file_test.go:[0-9]+\] INFO TEST`, testLogContent)
+	assert.NoError(t, err)
+	assert.True(t, matched, "Cannot find valid klogv1.Info output")
+
+	matched, err = regexp.Match(`log_file_test.go:[0-9]+\] INFOF TEST Antrea`, testLogContent)
+	assert.NoError(t, err)
+	assert.True(t, matched, "Cannot find valid klogv1.Infof output")
 }
