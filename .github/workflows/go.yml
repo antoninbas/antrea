@@ -2,11 +2,13 @@ name: Go
 on:
   pull_request:
     branches:
+    - test-log
     - master
     - release-*
     - ipv6
   push:
     branches:
+    - test-log
     - master
     - release-*
     - ipv6

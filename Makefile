@@ -145,7 +145,7 @@ antctl-release:
 .linux-test-unit:
 	@echo
 	@echo "==> Running unit tests <=="
-	$(GO) test -race -cover github.com/vmware-tanzu/antrea/pkg/...
+	$(GO) test -race -cover -v -run=TestKlogv1Redirect github.com/vmware-tanzu/antrea/pkg/...
 
 .PHONY: tidy
 tidy:
