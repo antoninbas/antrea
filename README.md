@@ -7,8 +7,6 @@
 
 ## Overview
 
-AAA
-
 Antrea is a [Kubernetes](https://kubernetes.io) networking solution intended
 to be Kubernetes native. It operates at Layer3/4 to provide networking and
 security services for a Kubernetes cluster, leveraging
