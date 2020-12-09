@@ -380,3 +380,27 @@ func Convert_controlplane_AppliedToGroupPatch_To_v1beta1_AppliedToGroupPatch(in 
 	out.RemovedGroupMembers = removedMembers
 	return nil
 }
+
+func Convert_controlplane_NodeStatsSummary_To_v1beta1_NodeStatsSummary(in *controlplane.NodeStatsSummary, out *NodeStatsSummary, s conversion.Scope) error {
+	out.ObjectMeta = in.ObjectMeta
+	var networkPolicies, antreaClusterNetworkPolicies, antreaNetworkPolicies []NetworkPolicyStats
+	for i := range in.NetworkPolicies {
+		var stats NetworkPolicyStats
+		Convert_controlplane_NetworkPolicyStats_To_v1beta1_NetworkPolicyStats(&in.NetworkPolicies[i], &stats, nil)
+		networkPolicies = append(networkPolicies, stats)
+	}
+	for i := range in.AntreaClusterNetworkPolicies {
+		var stats NetworkPolicyStats
+		Convert_controlplane_NetworkPolicyStats_To_v1beta1_NetworkPolicyStats(&in.AntreaClusterNetworkPolicies[i], &stats, nil)
+		antreaClusterNetworkPolicies = append(antreaClusterNetworkPolicies, stats)
+	}
+	for i := range in.AntreaNetworkPolicies {
+		var stats NetworkPolicyStats
+		Convert_controlplane_NetworkPolicyStats_To_v1beta1_NetworkPolicyStats(&in.AntreaNetworkPolicies[i], &stats, nil)
+		antreaNetworkPolicies = append(antreaNetworkPolicies, stats)
+	}
+	out.NetworkPolicies = networkPolicies
+	out.AntreaClusterNetworkPolicies = antreaClusterNetworkPolicies
+	out.AntreaNetworkPolicies = antreaNetworkPolicies
+	return nil
+}

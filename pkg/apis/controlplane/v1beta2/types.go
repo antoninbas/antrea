@@ -267,6 +267,7 @@ type NodeStatsSummary struct {
 	AntreaClusterNetworkPolicies []NetworkPolicyStats `json:"antreaClusterNetworkPolicies,omitempty" protobuf:"bytes,3,rep,name=antreaClusterNetworkPolicies"`
 	// The TrafficStats of Antrea NetworkPolicies collected from the Node.
 	AntreaNetworkPolicies []NetworkPolicyStats `json:"antreaNetworkPolicies,omitempty" protobuf:"bytes,4,rep,name=antreaNetworkPolicies"`
+	MeshNodeLatencies     map[string]int64     `json:"meshNodeLatencies,omitempty" protobuf:"bytes,5,rep,name=meshNodeLatencies"`
 }
 
 // NetworkPolicyStats contains the information and traffic stats of a NetworkPolicy.

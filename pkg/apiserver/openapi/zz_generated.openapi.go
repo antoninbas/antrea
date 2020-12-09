@@ -2766,6 +2766,20 @@ func schema_pkg_apis_controlplane_v1beta2_NodeStatsSummary(ref common.ReferenceC
 							},
 						},
 					},
+					"meshNodeLatencies": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"object"},
+							AdditionalProperties: &spec.SchemaOrBool{
+								Allows: true,
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"integer"},
+										Format: "int64",
+									},
+								},
+							},
+						},
+					},
 				},
 			},
 		},

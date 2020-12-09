@@ -255,6 +255,7 @@ type NodeStatsSummary struct {
 	AntreaClusterNetworkPolicies []NetworkPolicyStats
 	// The TrafficStats of Antrea NetworkPolicies collected from the Node.
 	AntreaNetworkPolicies []NetworkPolicyStats
+	MeshNodeLatencies     map[string]int64
 }
 
 // NetworkPolicyStats contains the information and traffic stats of a NetworkPolicy.

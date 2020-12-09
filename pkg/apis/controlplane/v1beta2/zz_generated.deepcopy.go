@@ -620,6 +620,13 @@ func (in *NodeStatsSummary) DeepCopyInto(out *NodeStatsSummary) {
 		*out = make([]NetworkPolicyStats, len(*in))
 		copy(*out, *in)
 	}
+	if in.MeshNodeLatencies != nil {
+		in, out := &in.MeshNodeLatencies, &out.MeshNodeLatencies
+		*out = make(map[string]int64, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
 	return
 }
 

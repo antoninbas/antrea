@@ -37,6 +37,7 @@ import (
 	"github.com/vmware-tanzu/antrea/pkg/agent/interfacestore"
 	"github.com/vmware-tanzu/antrea/pkg/agent/metrics"
 	"github.com/vmware-tanzu/antrea/pkg/agent/openflow"
+	"github.com/vmware-tanzu/antrea/pkg/agent/pingmesh"
 	"github.com/vmware-tanzu/antrea/pkg/agent/proxy"
 	"github.com/vmware-tanzu/antrea/pkg/agent/querier"
 	"github.com/vmware-tanzu/antrea/pkg/agent/route"
@@ -149,6 +150,12 @@ func run(o *Options) error {
 		networkConfig,
 		nodeConfig)
 
+	pingMeshController := pingmesh.NewPingMeshController(
+		k8sClient,
+		informerFactory,
+		nodeConfig,
+	)
+
 	// podUpdates is a channel for receiving Pod updates from CNIServer and
 	// notifying NetworkPolicyController to reconcile rules related to the
 	// updated Pods.
@@ -251,6 +258,8 @@ func run(o *Options) error {
 	go antreaClientProvider.Run(stopCh)
 
 	go nodeRouteController.Run(stopCh)
+
+	go pingMeshController.Run(stopCh)
 
 	go networkPolicyController.Run(stopCh)
 

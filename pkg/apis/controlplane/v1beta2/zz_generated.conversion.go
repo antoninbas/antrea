@@ -730,6 +730,7 @@ func autoConvert_v1beta2_NodeStatsSummary_To_controlplane_NodeStatsSummary(in *N
 	out.NetworkPolicies = *(*[]controlplane.NetworkPolicyStats)(unsafe.Pointer(&in.NetworkPolicies))
 	out.AntreaClusterNetworkPolicies = *(*[]controlplane.NetworkPolicyStats)(unsafe.Pointer(&in.AntreaClusterNetworkPolicies))
 	out.AntreaNetworkPolicies = *(*[]controlplane.NetworkPolicyStats)(unsafe.Pointer(&in.AntreaNetworkPolicies))
+	out.MeshNodeLatencies = *(*map[string]int64)(unsafe.Pointer(&in.MeshNodeLatencies))
 	return nil
 }
 
@@ -743,6 +744,7 @@ func autoConvert_controlplane_NodeStatsSummary_To_v1beta2_NodeStatsSummary(in *c
 	out.NetworkPolicies = *(*[]NetworkPolicyStats)(unsafe.Pointer(&in.NetworkPolicies))
 	out.AntreaClusterNetworkPolicies = *(*[]NetworkPolicyStats)(unsafe.Pointer(&in.AntreaClusterNetworkPolicies))
 	out.AntreaNetworkPolicies = *(*[]NetworkPolicyStats)(unsafe.Pointer(&in.AntreaNetworkPolicies))
+	out.MeshNodeLatencies = *(*map[string]int64)(unsafe.Pointer(&in.MeshNodeLatencies))
 	return nil
 }
 

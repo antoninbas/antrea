@@ -268,6 +268,8 @@ message NodeStatsSummary {
 
   // The TrafficStats of Antrea NetworkPolicies collected from the Node.
   repeated NetworkPolicyStats antreaNetworkPolicies = 4;
+
+  map<string, int64> meshNodeLatencies = 5;
 }
 
 // PodReference represents a Pod Reference.
