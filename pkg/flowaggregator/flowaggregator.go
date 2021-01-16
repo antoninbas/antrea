@@ -16,7 +16,7 @@ package flowaggregator
 
 import (
 	"fmt"
-	"hash/fnv"
+	"net"
 	"time"
 
 	"github.com/vmware/go-ipfix/pkg/collector"
@@ -154,9 +154,18 @@ type flowAggregator struct {
 	registry                    ipfix.IPFIXRegistry
 	flowAggregatorAddress       string
 	k8sClient                   kubernetes.Interface
+	observationDomainID         uint32
 }
 
-func NewFlowAggregator(externalFlowCollectorAddr string, externalFlowCollectorProto string, exportInterval time.Duration, aggregatorTransportProtocol AggregatorTransportProtocol, flowAggregatorAddress string, k8sClient kubernetes.Interface) *flowAggregator {
+func NewFlowAggregator(
+	externalFlowCollectorAddr string,
+	externalFlowCollectorProto string,
+	exportInterval time.Duration,
+	aggregatorTransportProtocol AggregatorTransportProtocol,
+	flowAggregatorAddress string,
+	k8sClient kubernetes.Interface,
+	observationDomainID uint32,
+) *flowAggregator {
 	registry := ipfix.NewIPFIXRegistry()
 	registry.LoadRegistry()
 	fa := &flowAggregator{
@@ -171,15 +180,9 @@ func NewFlowAggregator(externalFlowCollectorAddr string, externalFlowCollectorPr
 		registry,
 		flowAggregatorAddress,
 		k8sClient,
+		observationDomainID,
 	}
 	return fa
-}
-
-func (fa *flowAggregator) genObservationID() (uint32, error) {
-	// TODO: Change to use cluster UUID to generate observation ID once it's available
-	h := fnv.New32()
-	h.Write([]byte(fa.flowAggregatorAddress))
-	return h.Sum32(), nil
 }
 
 func (fa *flowAggregator) InitCollectingProcess() error {
@@ -247,10 +250,6 @@ func (fa *flowAggregator) InitAggregationProcess() error {
 }
 
 func (fa *flowAggregator) initExportingProcess() error {
-	obsID, err := fa.genObservationID()
-	if err != nil {
-		return fmt.Errorf("cannot generate observation ID for flow aggregator: %v", err)
-	}
 	// TODO: This code can be further simplified by changing the go-ipfix API to accept
 	// externalFlowCollectorAddr and externalFlowCollectorProto instead of net.Addr input.
 	var expInput exporter.ExporterInput
@@ -259,7 +258,7 @@ func (fa *flowAggregator) initExportingProcess() error {
 		expInput = exporter.ExporterInput{
 			CollectorAddress:    fa.externalFlowCollectorAddr,
 			CollectorProtocol:   fa.externalFlowCollectorProto,
-			ObservationDomainID: obsID,
+			ObservationDomainID: fa.observationDomainID,
 			TempRefTimeout:      0,
 			PathMTU:             0,
 			IsEncrypted:         false,
@@ -269,7 +268,7 @@ func (fa *flowAggregator) initExportingProcess() error {
 		expInput = exporter.ExporterInput{
 			CollectorAddress:    fa.externalFlowCollectorAddr,
 			CollectorProtocol:   fa.externalFlowCollectorProto,
-			ObservationDomainID: obsID,
+			ObservationDomainID: fa.observationDomainID,
 			TempRefTimeout:      1800,
 			PathMTU:             0,
 			IsEncrypted:         false,
