@@ -3,11 +3,11 @@ name: Build and push latest image if needed
 on:
   pull_request:
     branches:
-      - main
+      - trigger-docker-multi-arch-build-on-pushes-and-releases
       - release-*
   push:
     branches:
-      - main
+      - trigger-docker-multi-arch-build-on-pushes-and-releases
       - release-*
 
 jobs:
@@ -34,7 +34,6 @@ jobs:
     - name: Build Antrea Docker image
       run: make
     - name: Push Antrea amd64 Docker image to registry
-      if: ${{ github.repository == 'vmware-tanzu/antrea' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       env:
         DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
@@ -43,7 +42,6 @@ jobs:
         docker tag antrea/antrea-ubuntu:latest antrea/antrea-ubuntu-amd64:latest
         docker push antrea/antrea-ubuntu-amd64:latest
     - name: Trigger Antrea arm builds and multi-arch manifest update
-      if: ${{ github.repository == 'vmware-tanzu/antrea' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       uses: benc-uk/workflow-dispatch@v1
       with:
         repo: vmware-tanzu/antrea-build-infra
