@@ -78,6 +78,8 @@ const (
 	priorityLow             = uint16(190)
 	priorityMiss            = uint16(0)
 	priorityTopAntreaPolicy = uint16(64990)
+	priorityDNSIntercept    = uint16(64991)
+	priorityDNSBypass       = uint16(64992)
 
 	// Index for priority cache
 	priorityIndex = "priority"
@@ -239,6 +241,7 @@ const (
 	// by the Flow Exporter to export flow records for connections denied by network
 	// policy rules.
 	CustomReasonDeny = 0b100
+	CustomReasonDNS  = 0b1000
 )
 
 var DispositionToString = map[uint32]string{
@@ -570,6 +573,30 @@ func (c *client) conntrackBypassRejectFlow(proto binding.Protocol) binding.Flow 
 		MatchRegMark(CustomReasonRejectRegMark).
 		Cookie(c.cookieAllocator.Request(cookie.Default).Raw()).
 		Action().ResubmitToTable(connectionTrackStateTable.GetNext()).
+		Done()
+}
+
+// dnsResponseBypassConntrackFlow generates a flow which is used to bypass the
+// dns response packetout from conntrack, to avoid unexpected packet drop.
+func (c *client) dnsResponseBypassConntrackFlow() binding.Flow {
+	conntrackTable := c.pipeline[conntrackTable]
+	return conntrackTable.BuildFlow(priorityHigh).
+		MatchRegFieldWithValue(CustomReasonField, CustomReasonDNS).
+		Cookie(c.cookieAllocator.Request(cookie.Default).Raw()).
+		Action().ResubmitToTable(l2ForwardingCalcTable).
+		Done()
+}
+
+// dnsResponseBypassPacketInFlow generates a flow which is used to bypass the
+// dns packetIn conjunction flow for dns response packetOut. This packetOut
+// should be sent directly to the requesting client without being intercepted
+// again.
+func (c *client) dnsResponseBypassPacketInFlow() binding.Flow {
+	dnsPacketInTable := c.pipeline[AntreaPolicyIngressRuleTable]
+	return dnsPacketInTable.BuildFlow(priorityDNSBypass).
+		MatchRegFieldWithValue(CustomReasonField, CustomReasonDNS).
+		Cookie(c.cookieAllocator.Request(cookie.Default).Raw()).
+		Action().ResubmitToTable(L2ForwardingOutTable).
 		Done()
 }
 
@@ -1711,6 +1738,18 @@ func (c *client) addFlowMatch(fb binding.FlowBuilder, matchKey *types.MatchKey, 
 		if portValue.Value > 0 {
 			fb = fb.MatchDstPort(portValue.Value, portValue.Mask)
 		}
+	case MatchTCPSrcPort:
+		fallthrough
+	case MatchTCPv6SrcPort:
+		fallthrough
+	case MatchUDPSrcPort:
+		fallthrough
+	case MatchUDPv6SrcPort:
+		fb = fb.MatchProtocol(matchKey.GetOFProtocol())
+		portValue := matchValue.(types.BitRange)
+		if portValue.Value > 0 {
+			fb = fb.MatchSrcPort(portValue.Value, portValue.Mask)
+		}
 	}
 	return fb
 }
@@ -1764,6 +1803,17 @@ func (c *client) defaultDropFlow(tableID binding.TableIDType, matchKey *types.Ma
 	return c.addFlowMatch(fb, matchKey, matchValue).
 		Action().Drop().
 		Cookie(c.cookieAllocator.Request(cookie.Default).Raw()).
+		Done()
+}
+
+// dnsPacketInFlow generates the flow to send dns response packets of fqdn policy selected
+// Pods to the fqdnController for processing.
+func (c *client) dnsPacketInFlow(conjunctionID uint32) binding.Flow {
+	return c.pipeline[AntreaPolicyIngressRuleTable].BuildFlow(priorityDNSIntercept).
+		MatchConjID(conjunctionID).
+		Cookie(c.cookieAllocator.Request(cookie.Default).Raw()).
+		Action().LoadToRegField(CustomReasonField, CustomReasonDNS).
+		Action().SendToController(uint8(PacketInReasonNP)).
 		Done()
 }
 

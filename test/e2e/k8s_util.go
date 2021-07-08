@@ -158,6 +158,49 @@ func (k *KubernetesUtils) Probe(ns1, pod1, ns2, pod2 string, port int32, protoco
 	return connectivity, nil
 }
 
+func (k *KubernetesUtils) ProbeEgress(ns, pod, dstName string, port int32, protocol v1.Protocol) (PodConnectivityMark, error) {
+	fromPods, err := k.GetPodsByLabel(ns, "pod", pod)
+	if err != nil {
+		return Error, fmt.Errorf("unable to get Pods from Namespace %s: %v", ns, err)
+	}
+	if len(fromPods) == 0 {
+		return Error, fmt.Errorf("no Pod of label pod=%s in Namespace %s found", pod, ns)
+	}
+	fromPod := fromPods[0]
+	// Both IPv4 and IPv6 address should be tested.
+	// There seems to be an issue when running Antrea in Kind where tunnel traffic is dropped at
+	// first. This leads to the first test being run consistently failing. To avoid this issue
+	// until it is resolved, we try to connect 3 times.
+	// See https://github.com/antrea-io/antrea/issues/467.
+	cmd := []string{
+		"/bin/sh",
+		"-c",
+	}
+	switch protocol {
+	case v1.ProtocolTCP:
+		cmd = append(cmd, fmt.Sprintf("for i in $(seq 1 3); do /agnhost connect %s:%d --timeout=1s --protocol=tcp && exit 0 || true; done; exit 1", dstName, port))
+	case v1.ProtocolUDP:
+		cmd = append(cmd, fmt.Sprintf("for i in $(seq 1 3); do /agnhost connect %s:%d --timeout=1s --protocol=udp && exit 0 || true; done; exit 1", dstName, port))
+	case v1.ProtocolSCTP:
+		cmd = append(cmd, fmt.Sprintf("for i in $(seq 1 3); do /agnhost connect %s:%d --timeout=1s --protocol=sctp && exit 0 || true; done; exit 1", dstName, port))
+	}
+	// HACK: inferring container name as c80, c81, etc, for simplicity.
+	containerName := fmt.Sprintf("c%v", port)
+	log.Tracef("Running: kubectl exec %s -c %s -n %s -- %s", fromPod.Name, containerName, fromPod.Namespace, strings.Join(cmd, " "))
+	stdout, stderr, err := k.runCommandFromPod(fromPod.Namespace, fromPod.Name, containerName, cmd)
+	if err != nil {
+		// log this error as trace since may be an expected failure
+		log.Tracef("%s/%s -> %s: error when running command: err - %v /// stdout - %s /// stderr - %s", ns, pod, dstName, err, stdout, stderr)
+		// do not return an error
+		if strings.Contains(stderr, "TIMEOUT") {
+			return Dropped, nil
+		} else {
+			return Rejected, nil
+		}
+	}
+	return Connected, nil
+}
+
 // CreateOrUpdateNamespace is a convenience function for idempotent setup of Namespaces
 func (k *KubernetesUtils) CreateOrUpdateNamespace(n string, labels map[string]string) (*v1.Namespace, error) {
 	ns := &v1.Namespace{

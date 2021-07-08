@@ -212,7 +212,8 @@ func run(o *Options) error {
 		antreaPolicyEnabled,
 		statusManagerEnabled,
 		denyConnStore,
-		asyncRuleDeleteInterval)
+		asyncRuleDeleteInterval,
+		o.config.DNSServerOverride)
 	if err != nil {
 		return fmt.Errorf("error creating new NetworkPolicy controller: %v", err)
 	}
