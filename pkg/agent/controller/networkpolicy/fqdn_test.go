@@ -19,21 +19,25 @@ import (
 
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	openflowtest "antrea.io/antrea/pkg/agent/openflow/testing"
 )
 
-func newMockFQDNController(controller *gomock.Controller) (*fqdnController, *openflowtest.MockClient) {
+func newMockFQDNController(t *testing.T, controller *gomock.Controller) (*fqdnController, *openflowtest.MockClient) {
 	mockOFClient := openflowtest.NewMockClient(controller)
 	mockOFClient.EXPECT().IsIPv4Enabled().Return(true).AnyTimes()
 	mockOFClient.EXPECT().IsIPv6Enabled().Return(false).AnyTimes()
 	mockOFClient.EXPECT().NewDNSpacketInConjunction(gomock.Any()).Return(nil).AnyTimes()
 	dirtyRuleHandler := func(rule string) {}
-	f, _ := newFQDNController(mockOFClient,
+	f, err := newFQDNController(
+		mockOFClient,
 		newIDAllocator(testAsyncDeleteInterval),
 		"10.10.1.2:53",
-		dirtyRuleHandler)
+		dirtyRuleHandler,
+	)
+	require.NoError(t, err)
 	return f, mockOFClient
 }
 
@@ -107,7 +111,7 @@ func TestAddFQDNRule(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			controller := gomock.NewController(t)
 			defer controller.Finish()
-			f, c := newMockFQDNController(controller)
+			f, c := newMockFQDNController(t, controller)
 			if tt.addressAdded {
 				c.EXPECT().AddAddressToDNSConjunction(dnsInterceptRuleID, gomock.Any()).Times(1)
 			}
@@ -121,9 +125,7 @@ func TestAddFQDNRule(t *testing.T) {
 			if tt.existingDNSCache != nil {
 				f.dnsEntryCache = tt.existingDNSCache
 			}
-			if err := f.addFQDNRule(tt.ruleID, tt.fqdns, tt.podAddrs); err != nil {
-				t.Fatalf("Error occurred in addFQDNRule %v", err)
-			}
+			require.NoError(t, f.addFQDNRule(tt.ruleID, tt.fqdns, tt.podAddrs), "Error when adding FQDN rule")
 			assert.Equal(t, tt.finalSelectorToRuleIDs, f.selectorItemToRuleIDs)
 			assert.Equal(t, tt.finalFQDNToSelectorItem, f.fqdnToSelectorItem)
 		})
@@ -242,7 +244,7 @@ func TestDeleteFQDNRule(t *testing.T) {
 				},
 				{
 					"mockRule2",
-					[]string{"*antrea.io$"},
+					[]string{"*antrea.io"},
 					sets.NewInt32(2),
 				},
 			},
@@ -251,7 +253,7 @@ func TestDeleteFQDNRule(t *testing.T) {
 				"maps.google.com": {},
 			},
 			"mockRule2",
-			[]string{"*antrea.io$"},
+			[]string{"*antrea.io"},
 			map[fqdnSelectorItem]sets.String{
 				selectorItem3: sets.NewString("mockRule1"),
 			},
@@ -267,18 +269,16 @@ func TestDeleteFQDNRule(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			controller := gomock.NewController(t)
 			defer controller.Finish()
-			f, c := newMockFQDNController(controller)
+			f, c := newMockFQDNController(t, controller)
 			c.EXPECT().AddAddressToDNSConjunction(dnsInterceptRuleID, gomock.Any()).Times(len(tt.previouslyAddedRules))
 			f.dnsEntryCache = tt.existingDNSCache
 			if tt.addressRemoved {
 				c.EXPECT().DeleteAddressFromDNSConjunction(dnsInterceptRuleID, gomock.Any()).Times(1)
 			}
 			for _, r := range tt.previouslyAddedRules {
-				f.addFQDNRule(r.ruleID, r.fqdns, r.podOFAddresses)
+				require.NoError(t, f.addFQDNRule(r.ruleID, r.fqdns, r.podOFAddresses), "Error when adding FQDN rule")
 			}
-			if err := f.deleteFQDNRule(tt.ruleID, tt.fqdns); err != nil {
-				t.Fatalf("Error occurred in deleteFQDNRule %v", err)
-			}
+			require.NoError(t, f.deleteFQDNRule(tt.ruleID, tt.fqdns), "Error when deleting FQDN rule")
 			assert.Equal(t, tt.finalSelectorToRuleIDs, f.selectorItemToRuleIDs)
 			assert.Equal(t, tt.finalFQDNToSelectorItem, f.fqdnToSelectorItem)
 		})

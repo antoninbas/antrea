@@ -15,7 +15,6 @@
 package networkpolicy
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -42,9 +41,9 @@ import (
 const (
 	kubeDNSServiceHost = "KUBE_DNS_SERVICE_HOST"
 	kubeDNSServicePort = "KUBE_DNS_SERVICE_PORT"
-)
 
-var ruleRealizationTimeout = time.Duration(2) * time.Second
+	ruleRealizationTimeout = 2 * time.Second
+)
 
 // fqdnSelectorItem is a selector that selects FQDNs,
 // either by exact name match or by regex pattern.
@@ -164,7 +163,6 @@ func newFQDNController(client openflow.Client, allocator *idAllocator, dnsServer
 	}
 	if controller.ofClient != nil {
 		if err := controller.ofClient.NewDNSpacketInConjunction(dnsInterceptRuleID); err != nil {
-			controller.idAllocator.release(dnsInterceptRuleID)
 			return nil, fmt.Errorf("failed to install flow for DNS response interception: %w", err)
 		}
 	}
@@ -457,9 +455,9 @@ func (f *fqdnController) onDNSResponseMsg(dnsMsg *dns.Msg, lookupTime time.Time,
 
 // syncDirtyRules triggers rule syncs for rules that are affected by the FQDN of DNS response
 // event. Note that if the query is initiated by the client Pod (not by the fqdnController, in
-// which case waitCh will not nil), even when addressUpdated is false, the function will still
-// verify if there was any previous rule realization errors for the dirty rules. If so, it will
-// wait for another trial of realization of these rules, before forwarding the response to the
+// which case waitCh will not be nil), even when addressUpdate is false, the function will still
+// verify if there was any previous rule realization error for the dirty rules. If so, it will
+// wait for another attempt of realization of these rules, before forwarding the response to the
 // original client.
 func (f *fqdnController) syncDirtyRules(fqdn string, waitCh chan error, addressUpdate bool) {
 	if waitCh == nil {
@@ -501,7 +499,7 @@ func (f *fqdnController) syncDirtyRules(fqdn string, waitCh chan error, addressU
 
 // subscribe registers a subscriber with its dirty rules update events. When the
 // ruleSyncTracker receives a rule realization update, it will decrease the
-// dirty rule count of each subsriber of that rule by one, if the rule is
+// dirty rule count of each subscriber of that rule by one, if the rule is
 // successfully reconciled.
 func (rst *ruleSyncTracker) subscribe(waitCh chan error, dirtyRules sets.String) {
 	subscriber := &subscriber{waitCh, len(dirtyRules)}
@@ -534,7 +532,7 @@ func (rst *ruleSyncTracker) Run(stopCh <-chan struct{}) {
 					}
 					s.rulesToSyncCount--
 					if s.rulesToSyncCount == 0 {
-						// All dirty rules for that subscriber has been processed successfully.
+						// All dirty rules for that subscriber have been processed successfully.
 						s.waitCh <- nil
 					}
 				}
@@ -669,9 +667,6 @@ func (f *fqdnController) makeDNSRequest(fqdn string) error {
 
 // implements openflow.PacketInHandler
 func (f *fqdnController) HandlePacketIn(pktIn *ofctrl.PacketIn) error {
-	if pktIn == nil {
-		return errors.New("empty packetin for Antrea Policy")
-	}
 	matches := pktIn.GetMatches()
 	// Get custom reasons in this packet-in.
 	match := getMatchRegField(matches, openflow.CustomReasonField)

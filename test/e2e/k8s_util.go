@@ -84,6 +84,51 @@ func (k *KubernetesUtils) GetPodsByLabel(ns string, key string, val string) ([]v
 	return v1PodList, nil
 }
 
+func (k *KubernetesUtils) probe(
+	pod *v1.Pod,
+	podName string,
+	dstAddr string,
+	dstName string,
+	port int32,
+	protocol v1.Protocol,
+) PodConnectivityMark {
+	// There seems to be an issue when running Antrea in Kind where tunnel traffic is dropped at
+	// first. This leads to the first test being run consistently failing. To avoid this issue
+	// until it is resolved, we try to connect 3 times.
+	// See https://github.com/antrea-io/antrea/issues/467.
+	cmd := []string{
+		"/bin/sh",
+		"-c",
+	}
+	switch protocol {
+	case v1.ProtocolTCP:
+		cmd = append(cmd, fmt.Sprintf("for i in $(seq 1 3); do /agnhost connect %s:%d --timeout=1s --protocol=tcp && exit 0 || true; done; exit 1", dstAddr, port))
+	case v1.ProtocolUDP:
+		cmd = append(cmd, fmt.Sprintf("for i in $(seq 1 3); do /agnhost connect %s:%d --timeout=1s --protocol=udp && exit 0 || true; done; exit 1", dstAddr, port))
+	case v1.ProtocolSCTP:
+		cmd = append(cmd, fmt.Sprintf("for i in $(seq 1 3); do /agnhost connect %s:%d --timeout=1s --protocol=sctp && exit 0 || true; done; exit 1", dstAddr, port))
+	}
+	// HACK: inferring container name as c80, c81, etc, for simplicity.
+	containerName := fmt.Sprintf("c%v", port)
+	log.Tracef("Running: kubectl exec %s -c %s -n %s -- %s", pod.Name, containerName, pod.Namespace, strings.Join(cmd, " "))
+	stdout, stderr, err := k.runCommandFromPod(pod.Namespace, pod.Name, containerName, cmd)
+	var curConnectivity PodConnectivityMark
+	if err != nil {
+		// log this error as trace since may be an expected failure
+		log.Tracef("%s -> %s: error when running command: err - %v /// stdout - %s /// stderr - %s", podName, dstName, err, stdout, stderr)
+		// do not return an error
+		if strings.Contains(stderr, "TIMEOUT") {
+			curConnectivity = Dropped
+		} else {
+			curConnectivity = Rejected
+		}
+	} else {
+		curConnectivity = Connected
+	}
+
+	return curConnectivity
+}
+
 // Probe execs into a Pod and checks its connectivity to another Pod. Of course it
 // assumes that the target Pod is serving on the input port, and also that agnhost
 // is installed. The connectivity from source Pod to all IPs of the target Pod
@@ -115,40 +160,7 @@ func (k *KubernetesUtils) Probe(ns1, pod1, ns2, pod2 string, port int32, protoco
 		if strings.Contains(toIP, ":") {
 			toIP = fmt.Sprintf("[%s]", toIP)
 		}
-		// There seems to be an issue when running Antrea in Kind where tunnel traffic is dropped at
-		// first. This leads to the first test being run consistently failing. To avoid this issue
-		// until it is resolved, we try to connect 3 times.
-		// See https://github.com/antrea-io/antrea/issues/467.
-		cmd := []string{
-			"/bin/sh",
-			"-c",
-		}
-		switch protocol {
-		case v1.ProtocolTCP:
-			cmd = append(cmd, fmt.Sprintf("for i in $(seq 1 3); do /agnhost connect %s:%d --timeout=1s --protocol=tcp && exit 0 || true; done; exit 1", toIP, port))
-		case v1.ProtocolUDP:
-			cmd = append(cmd, fmt.Sprintf("for i in $(seq 1 3); do /agnhost connect %s:%d --timeout=1s --protocol=udp && exit 0 || true; done; exit 1", toIP, port))
-		case v1.ProtocolSCTP:
-			cmd = append(cmd, fmt.Sprintf("for i in $(seq 1 3); do /agnhost connect %s:%d --timeout=1s --protocol=sctp && exit 0 || true; done; exit 1", toIP, port))
-		}
-		// HACK: inferring container name as c80, c81, etc, for simplicity.
-		containerName := fmt.Sprintf("c%v", port)
-		log.Tracef("Running: kubectl exec %s -c %s -n %s -- %s", fromPod.Name, containerName, fromPod.Namespace, strings.Join(cmd, " "))
-		stdout, stderr, err := k.runCommandFromPod(fromPod.Namespace, fromPod.Name, containerName, cmd)
-		var curConnectivity PodConnectivityMark
-		if err != nil {
-			// log this error as trace since may be an expected failure
-			log.Tracef("%s/%s -> %s/%s: error when running command: err - %v /// stdout - %s /// stderr - %s", ns1, pod1, ns2, pod2, err, stdout, stderr)
-			// do not return an error
-			if strings.Contains(stderr, "TIMEOUT") {
-				curConnectivity = Dropped
-			} else {
-				curConnectivity = Rejected
-			}
-		} else {
-			curConnectivity = Connected
-		}
-
+		curConnectivity := k.probe(&fromPod, fmt.Sprintf("%s/%s", ns1, pod1), toIP, fmt.Sprintf("%s/%s", ns2, pod2), port, protocol)
 		if connectivity == Unknown {
 			connectivity = curConnectivity
 		} else if connectivity != curConnectivity {
@@ -158,7 +170,9 @@ func (k *KubernetesUtils) Probe(ns1, pod1, ns2, pod2 string, port int32, protoco
 	return connectivity, nil
 }
 
-func (k *KubernetesUtils) ProbeEgress(ns, pod, dstName string, port int32, protocol v1.Protocol) (PodConnectivityMark, error) {
+// Probe execs into a Pod and checks its connectivity to an arbirary destination
+// address.
+func (k *KubernetesUtils) ProbeEgress(ns, pod, dstAddr string, port int32, protocol v1.Protocol) (PodConnectivityMark, error) {
 	fromPods, err := k.GetPodsByLabel(ns, "pod", pod)
 	if err != nil {
 		return Error, fmt.Errorf("unable to get Pods from Namespace %s: %v", ns, err)
@@ -167,38 +181,9 @@ func (k *KubernetesUtils) ProbeEgress(ns, pod, dstName string, port int32, proto
 		return Error, fmt.Errorf("no Pod of label pod=%s in Namespace %s found", pod, ns)
 	}
 	fromPod := fromPods[0]
-	// Both IPv4 and IPv6 address should be tested.
-	// There seems to be an issue when running Antrea in Kind where tunnel traffic is dropped at
-	// first. This leads to the first test being run consistently failing. To avoid this issue
-	// until it is resolved, we try to connect 3 times.
-	// See https://github.com/antrea-io/antrea/issues/467.
-	cmd := []string{
-		"/bin/sh",
-		"-c",
-	}
-	switch protocol {
-	case v1.ProtocolTCP:
-		cmd = append(cmd, fmt.Sprintf("for i in $(seq 1 3); do /agnhost connect %s:%d --timeout=1s --protocol=tcp && exit 0 || true; done; exit 1", dstName, port))
-	case v1.ProtocolUDP:
-		cmd = append(cmd, fmt.Sprintf("for i in $(seq 1 3); do /agnhost connect %s:%d --timeout=1s --protocol=udp && exit 0 || true; done; exit 1", dstName, port))
-	case v1.ProtocolSCTP:
-		cmd = append(cmd, fmt.Sprintf("for i in $(seq 1 3); do /agnhost connect %s:%d --timeout=1s --protocol=sctp && exit 0 || true; done; exit 1", dstName, port))
-	}
-	// HACK: inferring container name as c80, c81, etc, for simplicity.
-	containerName := fmt.Sprintf("c%v", port)
-	log.Tracef("Running: kubectl exec %s -c %s -n %s -- %s", fromPod.Name, containerName, fromPod.Namespace, strings.Join(cmd, " "))
-	stdout, stderr, err := k.runCommandFromPod(fromPod.Namespace, fromPod.Name, containerName, cmd)
-	if err != nil {
-		// log this error as trace since may be an expected failure
-		log.Tracef("%s/%s -> %s: error when running command: err - %v /// stdout - %s /// stderr - %s", ns, pod, dstName, err, stdout, stderr)
-		// do not return an error
-		if strings.Contains(stderr, "TIMEOUT") {
-			return Dropped, nil
-		} else {
-			return Rejected, nil
-		}
-	}
-	return Connected, nil
+
+	connectivity := k.probe(&fromPod, fmt.Sprintf("%s/%s", ns, pod), dstAddr, dstAddr, port, protocol)
+	return connectivity, nil
 }
 
 // CreateOrUpdateNamespace is a convenience function for idempotent setup of Namespaces

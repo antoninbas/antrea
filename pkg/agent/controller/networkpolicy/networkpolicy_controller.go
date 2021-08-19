@@ -117,26 +117,24 @@ func NewNetworkPolicyController(antreaClientGetter agent.AntreaClientProvider,
 	c := &Controller{
 		antreaClientProvider: antreaClientGetter,
 		queue:                workqueue.NewNamedRateLimitingQueue(workqueue.NewItemExponentialFailureRateLimiter(minRetryDelay, maxRetryDelay), "networkpolicyrule"),
-		reconciler:           newReconciler(ofClient, ifaceStore, idAllocator),
 		ofClient:             ofClient,
 		antreaPolicyEnabled:  antreaPolicyEnabled,
 		statusManagerEnabled: statusManagerEnabled,
 		denyConnStore:        denyConnStore,
 	}
-	c.ruleCache = newRuleCache(c.enqueueRule, entityUpdates)
-	if statusManagerEnabled {
-		c.statusManager = newStatusController(antreaClientGetter, nodeName, c.ruleCache)
-	}
 	if antreaPolicyEnabled {
-		f, err := newFQDNController(ofClient, idAllocator, dnsServerOverride, c.enqueueRule)
-		if err != nil {
+		var err error
+		if c.fqdnController, err = newFQDNController(ofClient, idAllocator, dnsServerOverride, c.enqueueRule); err != nil {
 			return nil, err
 		}
-		c.fqdnController = f
-		c.reconciler.RegisterFQDNController(c.fqdnController)
 		if c.ofClient != nil {
 			c.ofClient.RegisterPacketInHandler(uint8(openflow.PacketInReasonNP), "dnsresponse", c.fqdnController)
 		}
+	}
+	c.reconciler = newReconciler(ofClient, ifaceStore, idAllocator, c.fqdnController)
+	c.ruleCache = newRuleCache(c.enqueueRule, entityUpdates)
+	if statusManagerEnabled {
+		c.statusManager = newStatusController(antreaClientGetter, nodeName, c.ruleCache)
 	}
 	// Create a WaitGroup that is used to block network policy workers from asynchronously processing
 	// NP rules until the events preceding bookmark are synced. It can also be used as part of the
@@ -501,11 +499,11 @@ func (c *Controller) processAllItemsInQueue() {
 func (c *Controller) syncRule(key string) error {
 	startTime := time.Now()
 	defer func() {
-		klog.V(4).Infof("Finished syncing rule %q. (%v)", key, time.Since(startTime))
+		klog.V(4).InfoS("Finished syncing rule", "ruleID", key, "duration", time.Since(startTime))
 	}()
 	rule, effective, realizable := c.ruleCache.GetCompletedRule(key)
 	if !effective {
-		klog.V(2).Infof("Rule %v was not effective, removing its flows", key)
+		klog.V(2).InfoS("Rule was not effective, removing its flows", "ruleID", key)
 		if err := c.reconciler.Forget(key); err != nil {
 			return err
 		}
@@ -519,14 +517,14 @@ func (c *Controller) syncRule(key string) error {
 	// If the rule is not realizable, we can simply skip it as it will be marked as dirty
 	// and queued again when we receive the missing group it missed.
 	if !realizable {
-		klog.V(2).Infof("Rule %v was not realizable, skipping", key)
+		klog.V(2).InfoS("Rule is not realizable, skipping", "ruleID", key)
 		return nil
 	}
 	err := c.reconciler.Reconcile(rule)
 	if c.fqdnController != nil {
 		// No matter whether the rule reconciliation succeeds or not, fqdnController
 		// needs to be notified of the status.
-		klog.V(2).Infof("Rule realization was done for %v", key)
+		klog.V(2).InfoS("Rule realization was done", "ruleID", key)
 		c.fqdnController.notifyRuleUpdate(key, err)
 	}
 	if err != nil {

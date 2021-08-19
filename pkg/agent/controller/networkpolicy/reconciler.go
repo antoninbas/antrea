@@ -61,10 +61,6 @@ type Reconciler interface {
 	// RunIDAllocatorWorker runs the worker that deletes the rules from the cache
 	// in idAllocator.
 	RunIDAllocatorWorker(stopCh <-chan struct{})
-
-	// RegisterFQDNController sets the fqdnController for the reconciler so that it
-	// can reconcile fqdn rules.
-	RegisterFQDNController(fc *fqdnController)
 }
 
 // servicesKey is used to identify Services based on their numbered ports.
@@ -209,7 +205,9 @@ type reconciler struct {
 // newReconciler returns a new *reconciler.
 func newReconciler(ofClient openflow.Client,
 	ifaceStore interfacestore.InterfaceStore,
-	idAllocator *idAllocator) *reconciler {
+	idAllocator *idAllocator,
+	fqdnController *fqdnController,
+) *reconciler {
 	priorityAssigners := map[binding.TableIDType]*tablePriorityAssigner{}
 	for _, table := range openflow.GetAntreaPolicyBaselineTierTables() {
 		priorityAssigners[table] = &tablePriorityAssigner{
@@ -227,6 +225,7 @@ func newReconciler(ofClient openflow.Client,
 		lastRealizeds:     sync.Map{},
 		idAllocator:       idAllocator,
 		priorityAssigners: priorityAssigners,
+		fqdnController:    fqdnController,
 	}
 	// Check if ofClient is nil or not to be compatible with unit tests.
 	if ofClient != nil {
@@ -242,12 +241,6 @@ func (r *reconciler) RunIDAllocatorWorker(stopCh <-chan struct{}) {
 	defer r.idAllocator.deleteQueue.ShutDown()
 	go wait.Until(r.idAllocator.worker, time.Second, stopCh)
 	<-stopCh
-}
-
-// RegisterFQDNController sets the fqdnController for the reconciler so that it
-// can reconcile fqdn rules.
-func (r *reconciler) RegisterFQDNController(fc *fqdnController) {
-	r.fqdnController = fc
 }
 
 // Reconcile checks whether the provided rule have been enforced or not, and
@@ -634,7 +627,7 @@ func (r *reconciler) update(lastRealized *lastRealized, newRule *CompletedRule, 
 	} else {
 		if r.fqdnController != nil && len(newRule.To.FQDNs) > 0 {
 			if err := r.fqdnController.addFQDNRule(newRule.ID, newRule.To.FQDNs, r.getOFPorts(newRule.TargetMembers)); err != nil {
-				klog.ErrorS(err, "Error when adding FQDN rule", "ruleID", newRule.ID)
+				return fmt.Errorf("error when adding FQDN rule %s: %w", newRule.ID, err)
 			}
 		}
 		newIPs := r.getIPs(newRule.TargetMembers)
