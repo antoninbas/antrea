@@ -74,6 +74,9 @@ var (
 	// reservedTierNames stores the set of Tier names which cannot be deleted
 	// since they are created by Antrea.
 	reservedTierNames = sets.NewString("baseline", "application", "platform", "networkops", "securityops", "emergency")
+	// allowedFQDNChars validates that the matchPattern field contains only valid DNS characters
+	// and the wildcard '*' character.
+	allowedFQDNChars = regexp.MustCompile("^[-0-9a-zA-Z.*]+$")
 )
 
 // RegisterAntreaPolicyValidator registers an Antrea-native policy validator
@@ -546,9 +549,6 @@ func (v *antreaPolicyValidator) validateTierForPolicy(tier string) (string, bool
 
 // validateFQDNSelectors validates the toFQDN field set in Antrea-native policy egress rules are valid.
 func (a *antreaPolicyValidator) validateFQDNSelectors(egressRules []crdv1alpha1.Rule) (string, bool) {
-	// allowedFQDNChars validates that the matchPattern field contains only valid
-	// DNS characters and the wildcard '*' character.
-	allowedFQDNChars := regexp.MustCompile("^[-0-9a-zA-Z.*]+$")
 	for _, r := range egressRules {
 		for _, peer := range r.To {
 			if len(peer.FQDN) > 0 && !allowedFQDNChars.MatchString(peer.FQDN) {

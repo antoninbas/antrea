@@ -593,6 +593,10 @@ func (c *client) dnsResponseBypassConntrackFlow() binding.Flow {
 // again.
 func (c *client) dnsResponseBypassPacketInFlow() binding.Flow {
 	dnsPacketInTable := c.pipeline[AntreaPolicyIngressRuleTable]
+	// TODO: use a unified register bit to mark packetOuts. The pipeline does not need to be
+	// aware of why the packetOut is being set by the controller, it just needs to be aware that
+	// this is a packetOut message and that some pipeline stages (conntrack, policy enforcement)
+	// should therefore be skipped.
 	return dnsPacketInTable.BuildFlow(priorityDNSBypass).
 		MatchRegFieldWithValue(CustomReasonField, CustomReasonDNS).
 		Cookie(c.cookieAllocator.Request(cookie.Default).Raw()).

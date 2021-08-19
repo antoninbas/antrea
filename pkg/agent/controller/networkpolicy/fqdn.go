@@ -36,6 +36,7 @@ import (
 	"antrea.io/antrea/pkg/agent/openflow"
 	"antrea.io/antrea/pkg/agent/types"
 	binding "antrea.io/antrea/pkg/ovs/openflow"
+	utilsets "antrea.io/antrea/pkg/util/sets"
 )
 
 const (
@@ -164,7 +165,7 @@ func newFQDNController(client openflow.Client, allocator *idAllocator, dnsServer
 	if controller.ofClient != nil {
 		if err := controller.ofClient.NewDNSpacketInConjunction(dnsInterceptRuleID); err != nil {
 			controller.idAllocator.release(dnsInterceptRuleID)
-			return nil, fmt.Errorf("failed to install flow for DNS response interception")
+			return nil, fmt.Errorf("failed to install flow for DNS response interception: %w", err)
 		}
 	}
 	if dnsServerOverride != "" {
@@ -233,7 +234,7 @@ func (f *fqdnController) getIPsForFQDNSelectors(fqdns []string) []net.IP {
 		fqdnSelectorItem := fqdnToSelectorItem(fqdn)
 		fqdnsMatched, ok := f.selectorItemToFQDN[fqdnSelectorItem]
 		if !ok {
-			klog.Errorf("FQDN selector %v is not known to the controller, cannot get IPs", fqdnSelectorItem)
+			klog.ErrorS(nil, "FQDN selector is not known to the controller, cannot get IPs", "fqdnSelector", fqdnSelectorItem)
 			return matchedIPs
 		}
 		for fqdn := range fqdnsMatched {
@@ -287,11 +288,11 @@ func (f *fqdnController) updateRuleSelectedPods(ruleID string, podOFAddrs sets.I
 	defer f.fqdnRuleToPodsMutex.Unlock()
 	originalPodSet, newPodSet := sets.Int32{}, sets.Int32{}
 	for _, pods := range f.fqdnRuleToSelectedPods {
-		originalPodSet = originalPodSet.Union(pods)
+		utilsets.MergeInt32(originalPodSet, pods)
 	}
 	f.fqdnRuleToSelectedPods[ruleID] = podOFAddrs
 	for _, pods := range f.fqdnRuleToSelectedPods {
-		newPodSet = newPodSet.Union(pods)
+		utilsets.MergeInt32(newPodSet, pods)
 	}
 	addedPods, removedPods := newPodSet.Difference(originalPodSet), originalPodSet.Difference(newPodSet)
 	if len(addedPods) > 0 {
@@ -366,16 +367,16 @@ func (f *fqdnController) deleteRuleSelectedPods(ruleID string) error {
 	}
 	originalPodSet, newPodSet := sets.Int32{}, sets.Int32{}
 	for _, pods := range f.fqdnRuleToSelectedPods {
-		originalPodSet = originalPodSet.Union(pods)
+		utilsets.MergeInt32(originalPodSet, pods)
 	}
 	delete(f.fqdnRuleToSelectedPods, ruleID)
 	for _, pods := range f.fqdnRuleToSelectedPods {
-		newPodSet = newPodSet.Union(pods)
+		utilsets.MergeInt32(newPodSet, pods)
 	}
 	removedPods := originalPodSet.Difference(newPodSet)
 	if len(removedPods) > 0 {
 		var removedOFAddrs []types.Address
-		for _, port := range removedPods.List() {
+		for port := range removedPods {
 			removedOFAddrs = append(removedOFAddrs, openflow.NewOFPortAddress(port))
 		}
 		if err := f.ofClient.DeleteAddressFromDNSConjunction(dnsInterceptRuleID, removedOFAddrs); err != nil {
@@ -389,13 +390,14 @@ func (f *fqdnController) deleteRuleSelectedPods(ruleID string) error {
 func (f *fqdnController) onDNSResponseMsg(dnsMsg *dns.Msg, lookupTime time.Time, waitCh chan error) {
 	fqdn, responseIPs, lowestTTL, err := f.parseDNSResponse(dnsMsg)
 	if err != nil {
-		klog.V(2).Infof("Failed to parse DNS response: %v", err)
+		klog.V(2).InfoS("Failed to parse DNS response")
 		if waitCh != nil {
 			waitCh <- fmt.Errorf("failed to parse DNS response: %v", err)
 		}
 		return
-	} else if len(responseIPs) == 0 {
-		klog.V(4).Infof("FQDN %s was not resolved to any addresses. Skip updating DNS cache.", fqdn)
+	}
+	if len(responseIPs) == 0 {
+		klog.V(4).InfoS("FQDN was not resolved to any addresses, skip updating DNS cache", "fqdn", fqdn)
 		if waitCh != nil {
 			waitCh <- nil
 		}
@@ -464,7 +466,7 @@ func (f *fqdnController) syncDirtyRules(fqdn string, waitCh chan error, addressU
 		if addressUpdate {
 			for selectorItem := range f.fqdnToSelectorItem[fqdn] {
 				for ruleID := range f.selectorItemToRuleIDs[selectorItem] {
-					klog.V(4).Infof("Reconciling dirty rule %s", ruleID)
+					klog.V(4).InfoS("Reconciling dirty rule", "ruleID", ruleID)
 					f.dirtyRuleHandler(ruleID)
 				}
 			}
@@ -472,7 +474,7 @@ func (f *fqdnController) syncDirtyRules(fqdn string, waitCh chan error, addressU
 	} else {
 		dirtyRules := sets.NewString()
 		for selectorItem := range f.fqdnToSelectorItem[fqdn] {
-			dirtyRules = dirtyRules.Union(f.selectorItemToRuleIDs[selectorItem])
+			utilsets.MergeString(dirtyRules, f.selectorItemToRuleIDs[selectorItem])
 		}
 		if !addressUpdate {
 			f.ruleSyncTracker.mutex.Lock()
@@ -485,13 +487,13 @@ func (f *fqdnController) syncDirtyRules(fqdn string, waitCh chan error, addressU
 			dirtyRules = f.ruleSyncTracker.dirtyRules.Intersection(dirtyRules)
 		}
 		if len(dirtyRules) > 0 {
-			klog.V(4).Infof("Dirty rules blocking packetOut are %v", dirtyRules)
+			klog.V(4).InfoS("Dirty rules blocking packetOut", "dirtyRules", dirtyRules)
 			f.ruleSyncTracker.subscribe(waitCh, dirtyRules)
 			for r := range dirtyRules {
 				f.dirtyRuleHandler(r)
 			}
 		} else {
-			klog.V(4).Infof("Rules are already synced for this FQDN")
+			klog.V(4).InfoS("Rules are already synced for this FQDN")
 			waitCh <- nil
 		}
 	}
@@ -584,7 +586,7 @@ func (f *fqdnController) parseDNSResponse(msg *dns.Msg) (string, map[string]net.
 		}
 	}
 	if len(responseIPs) > 0 {
-		klog.V(4).Infof("Received DNS Packet with valid Answer. Response IPs are %v and TTL is %v", responseIPs, lowestTTL)
+		klog.V(4).InfoS("Received DNS Packet with valid Answer", "IPs", responseIPs, "TTL", lowestTTL)
 	}
 	if strings.HasSuffix(fqdn, ".") {
 		fqdn = fqdn[:len(fqdn)-1]
@@ -614,26 +616,27 @@ func (f *fqdnController) handleErr(err error, key interface{}) {
 		f.dnsQueryQueue.Forget(key)
 		return
 	}
-	klog.Errorf("Error syncing fqdn name %q, retrying. Error: %v", key, err)
+	klog.ErrorS(err, "Error syncing FQDN, retrying", "fqdn", key)
 	f.dnsQueryQueue.AddRateLimited(key)
 }
 
 // makeDNSRequest makes a proactive query for a FQDN to the coreDNS service.
 func (f *fqdnController) makeDNSRequest(fqdn string) error {
 	if f.dnsServerAddr == "" {
-		return fmt.Errorf("no CoreDNS server is ready for query")
+		return fmt.Errorf("no DNS server is ready for query")
 	}
-	klog.Infof("Making DNS request to coreDNS for %s", fqdn)
+	klog.InfoS("Making DNS request", "fqdn", fqdn, "dnsServer", f.dnsServerAddr)
 	dnsClient := dns.Client{SingleInflight: true}
 	fqdnToQuery := fqdn
 	// The FQDN in the DNS request needs to end by a dot
-	if l := fqdn[len(fqdn)-1]; l != '.' {
+	if fqdn[len(fqdn)-1] != '.' {
 		fqdnToQuery = fqdn + "."
 	}
 	query := func(m *dns.Msg) (*dns.Msg, error) {
 		r, _, err := dnsClient.Exchange(m, f.dnsServerAddr)
 		if err != nil {
 			klog.ErrorS(err, "DNS exchange failed")
+			return nil, err
 		}
 		return r, nil
 	}
@@ -685,7 +688,7 @@ func (f *fqdnController) HandlePacketIn(pktIn *ofctrl.PacketIn) error {
 }
 
 func (f *fqdnController) handlePacketIn(pktIn *ofctrl.PacketIn) error {
-	klog.V(4).Infof("Received a packetIn for DNS response")
+	klog.V(4).InfoS("Received a packetIn for DNS response")
 	waitCh := make(chan error, 1)
 	handleUDPData := func(dnsPkt *protocol.UDP) {
 		dnsData := dnsPkt.Data
@@ -717,7 +720,7 @@ func (f *fqdnController) handlePacketIn(pktIn *ofctrl.PacketIn) error {
 		if err != nil {
 			return fmt.Errorf("error when syncing up rules for DNS reply, dropping packet: %v", err)
 		}
-		klog.V(2).Infof("Rule sync is successful or not needed. Forwarding DNS response to Pod.")
+		klog.V(2).InfoS("Rule sync is successful or not needed, forwarding DNS response to Pod")
 		return f.sendDNSPacketout(pktIn)
 	}
 }
@@ -753,7 +756,7 @@ func (f *fqdnController) sendDNSPacketout(pktIn *ofctrl.PacketIn) error {
 	if prot == protocol.Type_UDP {
 		udpSrcPort, udpDstPort, err := binding.GetUDPHeaderData(pktIn.Data.Data)
 		if err != nil {
-			klog.Errorf("Failed to get udp header data: %v", err)
+			klog.ErrorS(err, "Failed to get UDP header data")
 			return err
 		}
 		return f.ofClient.SendUDPPacketOut(
@@ -770,13 +773,4 @@ func (f *fqdnController) sendDNSPacketout(pktIn *ofctrl.PacketIn) error {
 			true)
 	}
 	return nil
-}
-
-// utility helper for debugging
-func (f *fqdnController) printCache(stage string) {
-	klog.Infof("At stage %s", stage)
-	klog.Infof("dnsEntry cache is: %v", f.dnsEntryCache)
-	klog.Infof("fqdnToSelectorItem is %v", f.fqdnToSelectorItem)
-	klog.Infof("selectorItemToFQDN is %v", f.selectorItemToFQDN)
-	klog.Infof("selectorItemToRuleIDs is %v", f.selectorItemToRuleIDs)
 }

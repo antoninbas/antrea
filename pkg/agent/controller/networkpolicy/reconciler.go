@@ -464,7 +464,13 @@ func (r *reconciler) computeOFRulesForAdd(rule *CompletedRule, ofPriority *uint1
 		}
 	} else {
 		if r.fqdnController != nil && len(rule.To.FQDNs) > 0 {
-			r.fqdnController.addFQDNRule(rule.ID, rule.To.FQDNs, r.getOFPorts(rule.TargetMembers))
+			// TODO: addFQDNRule installs new conjunctive flows, so maybe it doesn't
+			// belong in computeOFRulesForAdd. The error handling needs to be corrected
+			// as well: if the flows failed to install, there should be a retry
+			// mechanism.
+			if err := r.fqdnController.addFQDNRule(rule.ID, rule.To.FQDNs, r.getOFPorts(rule.TargetMembers)); err != nil {
+				klog.ErrorS(err, "Error when adding FQDN rule", "ruleID", rule.ID)
+			}
 		}
 		ips := r.getIPs(rule.TargetMembers)
 		lastRealized.podIPs = ips
@@ -627,7 +633,9 @@ func (r *reconciler) update(lastRealized *lastRealized, newRule *CompletedRule, 
 		}
 	} else {
 		if r.fqdnController != nil && len(newRule.To.FQDNs) > 0 {
-			r.fqdnController.addFQDNRule(newRule.ID, newRule.To.FQDNs, r.getOFPorts(newRule.TargetMembers))
+			if err := r.fqdnController.addFQDNRule(newRule.ID, newRule.To.FQDNs, r.getOFPorts(newRule.TargetMembers)); err != nil {
+				klog.ErrorS(err, "Error when adding FQDN rule", "ruleID", newRule.ID)
+			}
 		}
 		newIPs := r.getIPs(newRule.TargetMembers)
 		from := ipsToOFAddresses(newIPs)

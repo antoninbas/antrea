@@ -531,7 +531,7 @@ type clause struct {
 func (c *client) NewDNSpacketInConjunction(id uint32) error {
 	existingConj := c.getPolicyRuleConjunction(id)
 	if existingConj != nil {
-		klog.Infof("DNS Conjunction %d has already been added in cache", id)
+		klog.InfoS("DNS Conjunction has already been added to cache", "id", id)
 		return nil
 	}
 	conj := &policyRuleConjunction{
@@ -540,8 +540,7 @@ func (c *client) NewDNSpacketInConjunction(id uint32) error {
 		actionFlows: []binding.Flow{c.dnsPacketInFlow(id), c.dnsResponseBypassPacketInFlow(), c.dnsResponseBypassConntrackFlow()},
 	}
 	if err := c.ofEntryOperations.AddAll(conj.actionFlows); err != nil {
-		klog.Error("error in adding action flows for the DNS conjunction: %v", err)
-		return err
+		return fmt.Errorf("error when adding action flows for the DNS conjunction: %w", err)
 	}
 	udpService := v1beta2.Service{
 		Protocol: &protocolUDP,
