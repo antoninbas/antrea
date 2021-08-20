@@ -15,7 +15,9 @@
 package networkpolicy
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
@@ -25,16 +27,20 @@ import (
 	openflowtest "antrea.io/antrea/pkg/agent/openflow/testing"
 )
 
-func newMockFQDNController(t *testing.T, controller *gomock.Controller) (*fqdnController, *openflowtest.MockClient) {
+func newMockFQDNController(t *testing.T, controller *gomock.Controller, dnsServer *string) (*fqdnController, *openflowtest.MockClient) {
 	mockOFClient := openflowtest.NewMockClient(controller)
 	mockOFClient.EXPECT().IsIPv4Enabled().Return(true).AnyTimes()
 	mockOFClient.EXPECT().IsIPv6Enabled().Return(false).AnyTimes()
 	mockOFClient.EXPECT().NewDNSpacketInConjunction(gomock.Any()).Return(nil).AnyTimes()
 	dirtyRuleHandler := func(rule string) {}
+	dnsServerAddr := "8.8.8.8:53" // dummy DNS server, will not be used since we don't send any request in these tests
+	if dnsServer != nil {
+		dnsServerAddr = *dnsServer
+	}
 	f, err := newFQDNController(
 		mockOFClient,
 		newIDAllocator(testAsyncDeleteInterval),
-		"10.10.1.2:53",
+		dnsServerAddr,
 		dirtyRuleHandler,
 	)
 	require.NoError(t, err)
@@ -111,7 +117,7 @@ func TestAddFQDNRule(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			controller := gomock.NewController(t)
 			defer controller.Finish()
-			f, c := newMockFQDNController(t, controller)
+			f, c := newMockFQDNController(t, controller, nil)
 			if tt.addressAdded {
 				c.EXPECT().AddAddressToDNSConjunction(dnsInterceptRuleID, gomock.Any()).Times(1)
 			}
@@ -269,7 +275,7 @@ func TestDeleteFQDNRule(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			controller := gomock.NewController(t)
 			defer controller.Finish()
-			f, c := newMockFQDNController(t, controller)
+			f, c := newMockFQDNController(t, controller, nil)
 			c.EXPECT().AddAddressToDNSConjunction(dnsInterceptRuleID, gomock.Any()).Times(len(tt.previouslyAddedRules))
 			f.dnsEntryCache = tt.existingDNSCache
 			if tt.addressRemoved {
@@ -283,4 +289,17 @@ func TestDeleteFQDNRule(t *testing.T) {
 			assert.Equal(t, tt.finalFQDNToSelectorItem, f.fqdnToSelectorItem)
 		})
 	}
+}
+
+func TestLookupIPFallback(t *testing.T) {
+	controller := gomock.NewController(t)
+	defer controller.Finish()
+	dnsServer := "" // force a fallback to local resolver
+	f, _ := newMockFQDNController(t, controller, &dnsServer)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	// not ideal as a unit test because it requires the ability to resolve
+	// DNS names, but we don't expect this to be an actual problem.
+	err := f.lookupIP(ctx, "www.google.com")
+	require.NoError(t, err, "Error when resolving name")
 }

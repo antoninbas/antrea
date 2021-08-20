@@ -15,6 +15,7 @@
 package networkpolicy
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net"
@@ -43,6 +44,7 @@ const (
 	kubeDNSServicePort = "KUBE_DNS_SERVICE_PORT"
 
 	ruleRealizationTimeout = 2 * time.Second
+	dnsRequestTimeout      = 10 * time.Second
 )
 
 // fqdnSelectorItem is a selector that selects FQDNs,
@@ -167,13 +169,17 @@ func newFQDNController(client openflow.Client, allocator *idAllocator, dnsServer
 		}
 	}
 	if dnsServerOverride != "" {
+		klog.InfoS("DNS server override provided by user", "dnsServer", dnsServerOverride)
 		controller.dnsServerAddr = dnsServerOverride
 	} else {
 		host, port := os.Getenv(kubeDNSServiceHost), os.Getenv(kubeDNSServicePort)
 		if host == "" || port == "" {
-			return nil, fmt.Errorf("failed to derive DNS server from agent config or Service environment variable")
+			klog.InfoS("Unable to derive DNS server from the kube-dns Service, will fall back to local resolver")
+			controller.dnsServerAddr = ""
+		} else {
+			controller.dnsServerAddr = host + ":" + port
+			klog.InfoS("Using kube-dns Service for DNS requests", "dnsServer", controller.dnsServerAddr)
 		}
-		controller.dnsServerAddr = host + ":" + port
 	}
 	return controller, nil
 }
@@ -384,16 +390,13 @@ func (f *fqdnController) deleteRuleSelectedPods(ruleID string) error {
 	return nil
 }
 
-// onDNSResponseMsg handles a DNS response message intercepted.
-func (f *fqdnController) onDNSResponseMsg(dnsMsg *dns.Msg, lookupTime time.Time, waitCh chan error) {
-	fqdn, responseIPs, lowestTTL, err := f.parseDNSResponse(dnsMsg)
-	if err != nil {
-		klog.V(2).InfoS("Failed to parse DNS response")
-		if waitCh != nil {
-			waitCh <- fmt.Errorf("failed to parse DNS response: %v", err)
-		}
-		return
-	}
+func (f *fqdnController) onDNSResponse(
+	fqdn string,
+	responseIPs map[string]net.IP,
+	lowestTTL uint32,
+	lookupTime time.Time,
+	waitCh chan error,
+) {
 	if len(responseIPs) == 0 {
 		klog.V(4).InfoS("FQDN was not resolved to any addresses, skip updating DNS cache", "fqdn", fqdn)
 		if waitCh != nil {
@@ -451,6 +454,19 @@ func (f *fqdnController) onDNSResponseMsg(dnsMsg *dns.Msg, lookupTime time.Time,
 		f.dnsQueryQueue.AddAfter(fqdn, recordTTL.Sub(time.Now()))
 	}
 	f.syncDirtyRules(fqdn, waitCh, addressUpdate)
+}
+
+// onDNSResponseMsg handles a DNS response message intercepted.
+func (f *fqdnController) onDNSResponseMsg(dnsMsg *dns.Msg, lookupTime time.Time, waitCh chan error) {
+	fqdn, responseIPs, lowestTTL, err := f.parseDNSResponse(dnsMsg)
+	if err != nil {
+		klog.V(2).InfoS("Failed to parse DNS response")
+		if waitCh != nil {
+			waitCh <- fmt.Errorf("failed to parse DNS response: %v", err)
+		}
+		return
+	}
+	f.onDNSResponse(fqdn, responseIPs, lowestTTL, lookupTime, waitCh)
 }
 
 // syncDirtyRules triggers rule syncs for rules that are affected by the FQDN of DNS response
@@ -604,7 +620,9 @@ func (f *fqdnController) processNextWorkItem() bool {
 	}
 	defer f.dnsQueryQueue.Done(key)
 
-	err := f.makeDNSRequest(key.(string))
+	ctx, cancel := context.WithTimeout(context.Background(), dnsRequestTimeout)
+	defer cancel()
+	err := f.makeDNSRequest(ctx, key.(string))
 	f.handleErr(err, key)
 	return true
 }
@@ -618,12 +636,50 @@ func (f *fqdnController) handleErr(err error, key interface{}) {
 	f.dnsQueryQueue.AddRateLimited(key)
 }
 
-// makeDNSRequest makes a proactive query for a FQDN to the coreDNS service.
-func (f *fqdnController) makeDNSRequest(fqdn string) error {
-	if f.dnsServerAddr == "" {
-		return fmt.Errorf("no DNS server is ready for query")
+func (f *fqdnController) lookupIP(ctx context.Context, fqdn string) error {
+	const defaultTTL = 600 // 600 seconds, 10 minutes
+	resolver := net.DefaultResolver
+
+	v4ok, v6ok := true, true
+
+	makeResponseIPs := func(ips []net.IP) map[string]net.IP {
+		responseIPs := make(map[string]net.IP)
+		for _, ip := range ips {
+			responseIPs[ip.String()] = ip
+		}
+		return responseIPs
 	}
-	klog.InfoS("Making DNS request", "fqdn", fqdn, "dnsServer", f.dnsServerAddr)
+
+	if f.ofClient.IsIPv4Enabled() {
+		lookupTime := time.Now()
+		if ips, err := resolver.LookupIP(ctx, "ip4", fqdn); err == nil {
+			f.onDNSResponse(fqdn, makeResponseIPs(ips), defaultTTL, lookupTime, nil)
+		} else {
+			v4ok = false
+		}
+	}
+	if f.ofClient.IsIPv6Enabled() {
+		lookupTime := time.Now()
+		if ips, err := resolver.LookupIP(ctx, "ip6", fqdn); err == nil {
+			f.onDNSResponse(fqdn, makeResponseIPs(ips), defaultTTL, lookupTime, nil)
+		} else {
+			v6ok = false
+		}
+	}
+
+	if !v4ok || !v6ok {
+		return fmt.Errorf("DNS request failed for at least one network (v4 and/or v6)")
+	}
+	return nil
+}
+
+// makeDNSRequest makes a proactive query for a FQDN to the coreDNS service.
+func (f *fqdnController) makeDNSRequest(ctx context.Context, fqdn string) error {
+	if f.dnsServerAddr == "" {
+		klog.V(2).InfoS("No DNS server configured, falling back to local resolver")
+		return f.lookupIP(ctx, fqdn)
+	}
+	klog.V(2).InfoS("Making DNS request", "fqdn", fqdn, "dnsServer", f.dnsServerAddr)
 	dnsClient := dns.Client{SingleInflight: true}
 	fqdnToQuery := fqdn
 	// The FQDN in the DNS request needs to end by a dot
@@ -631,7 +687,7 @@ func (f *fqdnController) makeDNSRequest(fqdn string) error {
 		fqdnToQuery = fqdn + "."
 	}
 	query := func(m *dns.Msg) (*dns.Msg, error) {
-		r, _, err := dnsClient.Exchange(m, f.dnsServerAddr)
+		r, _, err := dnsClient.ExchangeContext(ctx, m, f.dnsServerAddr)
 		if err != nil {
 			klog.ErrorS(err, "DNS exchange failed")
 			return nil, err

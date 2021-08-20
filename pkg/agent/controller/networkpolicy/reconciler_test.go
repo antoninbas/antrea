@@ -98,7 +98,7 @@ func newCIDR(cidrStr string) *net.IPNet {
 }
 
 func newTestReconciler(t *testing.T, controller *gomock.Controller, ifaceStore interfacestore.InterfaceStore, ofClient *openflowtest.MockClient) *reconciler {
-	f, _ := newMockFQDNController(t, controller)
+	f, _ := newMockFQDNController(t, controller, nil)
 	r := newReconciler(ofClient, ifaceStore, newIDAllocator(testAsyncDeleteInterval), f)
 	return r
 }
