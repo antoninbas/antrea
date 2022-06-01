@@ -1,0 +1,25 @@
+name: Go
+on:
+  push:
+    branches:
+    - go-test
+
+jobs:
+  test-unit:
+    name: Unit test
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: Set up Go 1.17
+      uses: actions/setup-go@v3
+      with:
+        go-version: 1.17
+    - name: Check-out code
+      uses: actions/checkout@v3
+    - name: Run unit tests
+      run: |
+        mkdir .coverage/
+        go test -race -coverprofile=.coverage/coverage-unit.txt -covermode=atomic -cover -count=20 -run=TestMultipleProtocols ./pkg/agent/nodeportlocal/npl_agent_test.go
+        go test -race -coverprofile=.coverage/coverage-unit.txt -covermode=atomic -cover -count=10 ./pkg/agent/nodeportlocal/npl_agent_test.go

@@ -76,7 +76,7 @@ func openSocketsForPort(localPortOpener LocalPortOpener, port int) ([]ProtocolSo
 }
 
 func (pt *PortTable) getFreePort(podIP string, podPort int) (int, []ProtocolSocketData, error) {
-	klog.V(2).InfoS("Looking for free Node port", "podIP", podIP, "podPort", podPort)
+	klog.InfoS("Looking for free Node port", "podIP", podIP, "podPort", podPort)
 	numPorts := pt.EndPort - pt.StartPort + 1
 	for i := 0; i < numPorts; i++ {
 		port := pt.PortSearchStart + i
