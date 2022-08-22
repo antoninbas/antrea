@@ -64,15 +64,23 @@ const (
 // Set resyncPeriod to 0 to disable resyncing.
 const resyncPeriod = 0 * time.Minute
 
+var (
+	getPodContainerDeviceIDs = cniserver.GetPodContainerDeviceIDs
+)
+
+type InterfaceConfigurator interface {
+	ConfigureSriovSecondaryInterface(ConfigureSriovSecondaryInterfacepodName string, podNameSpace string, containerID string, containerNetNS string, containerIFDev string, mtu int, podSriovVFDeviceID string, result *current.Result) error
+}
+
 type PodController struct {
-	kubeClient         clientset.Interface
-	netAttachDefClient netdefclient.K8sCniCncfIoV1Interface
-	queue              workqueue.RateLimitingInterface
-	podInformer        cache.SharedIndexInformer
-	podLister          corelisters.PodLister
-	nodeName           string
-	podCache           cnipodcache.CNIPodInfoStore
-	cniServer          *cniserver.CNIServer
+	kubeClient               clientset.Interface
+	netAttachDefClient       netdefclient.K8sCniCncfIoV1Interface
+	queue                    workqueue.RateLimitingInterface
+	podInformer              cache.SharedIndexInformer
+	podLister                corelisters.PodLister
+	nodeName                 string
+	podCache                 cnipodcache.CNIPodInfoStore
+	getInterfaceConfigurator func() InterfaceConfigurator
 }
 
 func NewPodController(kubeClient clientset.Interface,
@@ -90,7 +98,9 @@ func NewPodController(kubeClient clientset.Interface,
 		podLister:          corelisters.NewPodLister(podInformer.GetIndexer()),
 		nodeName:           nodeName,
 		podCache:           podCache,
-		cniServer:          cniServer,
+		getInterfaceConfigurator: func() InterfaceConfigurator {
+			return cniServer.GetPodConfigurator()
+		},
 	}
 
 	podInformer.AddEventHandlerWithResyncPeriod(
@@ -274,12 +284,12 @@ func (pc *PodController) processNextWorkItem() bool {
 
 // Configure SRIOV VF as a Secondary Network Interface.
 func (pc *PodController) configureSriovAsSecondaryInterface(pod *corev1.Pod, netinfo *SecondaryNetworkObject, containerInfo *cnipodcache.CNIConfigInfo, result *current.Result) error {
-	podSriovVFDeviceID, err := cniserver.GetPodContainerDeviceIDs(pod.Name, pod.Namespace)
+	podSriovVFDeviceID, err := getPodContainerDeviceIDs(pod.Name, pod.Namespace)
 	if err != nil {
-		return fmt.Errorf("GetPodContainerDeviceIDs failed: %v", err)
+		return fmt.Errorf("getPodContainerDeviceIDs failed: %v", err)
 	}
 
-	if err = pc.cniServer.GetPodConfigurator().ConfigureSriovSecondaryInterface(
+	if err = pc.getInterfaceConfigurator().ConfigureSriovSecondaryInterface(
 		containerInfo.PodName,
 		containerInfo.PodNameSpace,
 		containerInfo.ContainerID,
