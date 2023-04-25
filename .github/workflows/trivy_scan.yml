@@ -15,7 +15,7 @@ on:
 
 jobs:
   build:
-    if: github.repository == 'antrea-io/antrea'
+    # if: github.repository == 'antrea-io/antrea'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
