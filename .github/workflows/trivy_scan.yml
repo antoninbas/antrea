@@ -15,7 +15,7 @@ on:
 
 jobs:
   build:
-    if: github.repository == 'antrea-io/antrea'
+    if: ${{ github.repository == 'antrea-io/antrea' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
@@ -37,14 +37,10 @@ jobs:
     - name: Run Trivy vulnerability scanner on latest Antrea Docker image
       if: ${{ always() && steps.pull.conclusion == 'success' }}
       uses: aquasecurity/trivy-action@0.11.0
-      # we cannot use .trivy.yml as we need to override some config parameters
-      # and that is not supported by aquasecurity/trivy-action
       with:
         scan-type: 'image'
         image-ref: 'antrea/antrea-ubuntu:latest'
-        exit-code: '1'
-        ignore-unfixed: true
-        severity: 'CRITICAL,HIGH'
+        trivy-config: '.trivy.yml'
         # whereabouts project doesn't upgrade dependencies frequently
         skip-files: '/opt/cni/bin/whereabouts'
         format: 'table'
@@ -55,9 +51,7 @@ jobs:
       with:
         scan-type: 'image'
         image-ref: 'antrea/antrea-ubuntu:${{ steps.find-antrea-greatest-version.outputs.antrea_version }}'
-        exit-code: '1'
-        ignore-unfixed: true
-        severity: 'CRITICAL,HIGH'
+        trivy-config: '.trivy.yml'
         skip-files: '/opt/cni/bin/whereabouts'
         format: 'table'
         output: 'trivy.${{ steps.find-antrea-greatest-version.outputs.antrea_version }}.txt'
@@ -68,10 +62,3 @@ jobs:
         name: trivy-scan-reports
         path: trivy.*.txt
         retention-days: 90 # max value
-  skip:
-    if: github.repository != 'antrea-io/antrea'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Skip
-        run: |
-          echo "Skipping image scan because workflow cannot be run from fork"
