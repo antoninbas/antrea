@@ -272,7 +272,11 @@ func TestController_RotateCertificates(t *testing.T) {
 	// It is important to truncate to the second, because the accuracy of notAfter in the
 	// certificate is at the second level. If we don't, the certificate may actually be rotated
 	// before 7s.
+	// We use a time in the future (1 hour), because newFakeController will create self-signed
+	// root certificates using the wall-clock time. We want to make sure that the root
+	// certificates are valid for this virtual time.
 	now := time.Now().Truncate(time.Second)
+	// now := time.Now().Add(1 * time.Hour).Truncate(time.Second)
 	fakeClock := testingclock.NewFakeClock(now)
 	fakeController := newFakeController(t, fakeClock)
 	defer fakeController.mockController.Finish()
@@ -307,7 +311,9 @@ func TestController_RotateCertificates(t *testing.T) {
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 	go fakeController.Run(stopCh)
+	fmt.Println("A")
 	<-signCh
+	fmt.Println("B")
 	// the rotation interval is determined by nextRotationDeadline as notBefore + (notAfter -
 	// notBefore) * k, where k is >= 0.7 and <= 0.9. We would therefore expect the rotation
 	// interval to be between [7, 9] seconds.
@@ -319,7 +325,9 @@ func TestController_RotateCertificates(t *testing.T) {
 	}
 	fakeClock.SetTime(now.Add(time.Second * 9))
 	// wait for the signer to finish signing two CSRs.
+	fmt.Println("C")
 	<-signCh
+	fmt.Println("D")
 	list, err := fakeController.kubeClient.CertificatesV1().CertificateSigningRequests().List(context.TODO(), metav1.ListOptions{})
 	assert.NoError(t, err)
 	assert.Len(t, list.Items, 2)
