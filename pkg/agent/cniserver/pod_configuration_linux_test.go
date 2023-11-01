@@ -268,7 +268,7 @@ func TestCreateOVSPort(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			testIfaceConfigurator := &fakeInterfaceConfigurator{ovsInterfaceTypeMapping: map[string]int{tc.portName: tc.portType}}
 			podConfigurator := createPodConfigurator(controller, testIfaceConfigurator)
-			containerConfig := buildContainerConfig(tc.portName, containerID, podName, podNamespace, &current.Interface{Mac: "01:02:03:04:05:06"}, ipamResult.IPs, tc.vlanID)
+			containerConfig := buildContainerConfig(tc.portName, containerID, podName, podNamespace, &current.Interface{Mac: "01:02:03:04:05:06"}, "host-local", ipamResult.IPs, tc.vlanID)
 			attachInfo := BuildOVSPortExternalIDs(containerConfig)
 			if tc.createOVSPort {
 				mockOVSBridgeClient.EXPECT().CreatePort(tc.portName, tc.portName, attachInfo).Times(1).Return(generateUUID(t), nil)
@@ -401,9 +401,9 @@ func TestCheckHostInterface(t *testing.T) {
 	containerID := generateUUID(t)
 	containerIntf := &current.Interface{Name: ifname, Sandbox: netns, Mac: "01:02:03:04:05:06"}
 	interfaces := []*current.Interface{containerIntf, {Name: hostIfaceName}}
-	containeIPs := ipamResult.IPs
+	containerIPs := ipamResult.IPs
 	ifaceMAC, _ := net.ParseMAC("01:02:03:04:05:06")
-	containerInterface := interfacestore.NewContainerInterface(hostIfaceName, containerID, "pod1", testPodNamespace, ifaceMAC, []net.IP{containerIP}, 1)
+	containerInterface := interfacestore.NewContainerInterface(hostIfaceName, containerID, "pod1", testPodNamespace, "host-local", ifaceMAC, []net.IP{containerIP}, 1)
 	containerInterface.OVSPortConfig = &interfacestore.OVSPortConfig{
 		PortUUID: generateUUID(t),
 		OFPort:   int32(10),
@@ -442,7 +442,7 @@ func TestCheckHostInterface(t *testing.T) {
 			fakeIfaceConfigrator.validateContainerPeerInterfaceError = tc.containerPeerErr
 			configurator := createPodConfigurator(controller, fakeIfaceConfigrator)
 			configurator.ifaceStore.AddInterface(containerInterface)
-			err := configurator.checkHostInterface(containerID, containerIntf, tc.containerIfKind, containeIPs, interfaces, tc.sriovVFDeviceID)
+			err := configurator.checkHostInterface(containerID, containerIntf, tc.containerIfKind, containerIPs, interfaces, tc.sriovVFDeviceID)
 			if tc.expectedErr != nil {
 				assert.Error(t, err)
 			} else {
@@ -501,7 +501,7 @@ func createPodConfigurator(controller *gomock.Controller, testIfaceConfigurator 
 	mockOFClient = openflowtest.NewMockClient(controller)
 	ifaceStore = interfacestore.NewInterfaceStore()
 	mockRoute = routetest.NewMockInterface(controller)
-	configurator, _ := newPodConfigurator(mockOVSBridgeClient, mockOFClient, mockRoute, ifaceStore, gwMAC, "system", false, false, channel.NewSubscribableChannel("PodUpdate", 100), nil)
+	configurator, _ := newPodConfigurator(mockOVSBridgeClient, mockOFClient, mockRoute, ifaceStore, testNodeConfig, "system", false, false, channel.NewSubscribableChannel("PodUpdate", 100), nil)
 	configurator.ifConfigurator = testIfaceConfigurator
 	return configurator
 }

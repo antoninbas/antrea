@@ -45,7 +45,7 @@ func TestNewInterfaceStore(t *testing.T) {
 
 func testContainerInterface(t *testing.T) {
 	store := NewInterfaceStore()
-	containerInterface := NewContainerInterface("ns0p0c0", "c0", "p0", "ns0", podMAC, []net.IP{podIP}, 2)
+	containerInterface := NewContainerInterface("ns0p0c0", "c0", "p0", "ns0", "host-local", podMAC, []net.IP{podIP}, 2)
 	containerInterface.OVSPortConfig = &OVSPortConfig{
 		OFPort:   12,
 		PortUUID: "1234567890",

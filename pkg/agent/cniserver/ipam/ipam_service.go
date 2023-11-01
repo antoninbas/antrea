@@ -38,7 +38,8 @@ var ipamResults = sync.Map{}
 
 type IPAMResult struct {
 	current.Result
-	VLANID uint16
+	VLANID   uint16
+	IPAMType string
 }
 
 type IPAMDriver interface {
@@ -93,6 +94,7 @@ func ExecIPAMAdd(cniArgs *cnipb.CniCmdArgs, k8sArgs *types.K8sArgs, ipamType str
 		if err != nil {
 			return nil, err
 		}
+		result.IPAMType = ipamType
 		ipamResults.Store(resultKey, result)
 		return result, nil
 	}

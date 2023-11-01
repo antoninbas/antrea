@@ -211,7 +211,7 @@ func TestIPAMService(t *testing.T) {
 	t.Run("Error on DEL", func(t *testing.T) {
 		ipamMock, cniServer, requestMsg := setup(t)
 		// Prepare cached IPAM result which will be deleted later.
-		ipamMock.EXPECT().Add(gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil, nil)
+		ipamMock.EXPECT().Add(gomock.Any(), gomock.Any(), gomock.Any()).Return(true, &ipam.IPAMResult{}, nil)
 		cniConfig, _ := cniServer.validateRequestMessage(requestMsg)
 		_, err := ipam.ExecIPAMAdd(cniConfig.CniCmdArgs, cniConfig.K8sArgs, cniConfig.IPAM.Type, cniConfig.getInfraContainer())
 		require.Nil(t, err, "expected no Add error")
@@ -237,7 +237,7 @@ func TestIPAMService(t *testing.T) {
 
 	t.Run("Idempotent Call of IPAM ADD/DEL for the same Pod", func(t *testing.T) {
 		ipamMock, cniServer, requestMsg := setup(t)
-		ipamMock.EXPECT().Add(gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil, nil)
+		ipamMock.EXPECT().Add(gomock.Any(), gomock.Any(), gomock.Any()).Return(true, &ipam.IPAMResult{}, nil)
 		ipamMock.EXPECT().Del(gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(2)
 		cniConfig, response := cniServer.validateRequestMessage(requestMsg)
 		require.Nil(t, response, "expected no rpc error")
@@ -254,7 +254,7 @@ func TestIPAMService(t *testing.T) {
 
 	t.Run("Idempotent Call of IPAM ADD/DEL for the same Pod with different containers", func(t *testing.T) {
 		ipamMock, cniServer, requestMsg := setup(t)
-		ipamMock.EXPECT().Add(gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil, nil).Times(2)
+		ipamMock.EXPECT().Add(gomock.Any(), gomock.Any(), gomock.Any()).Return(true, &ipam.IPAMResult{}, nil).Times(2)
 		ipamMock.EXPECT().Del(gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(2)
 		cniConfig, response := cniServer.validateRequestMessage(requestMsg)
 		require.Nil(t, response, "expected no rpc error")
@@ -585,7 +585,7 @@ func TestValidateOVSInterface(t *testing.T) {
 	hostIface := &current.Interface{Name: hostIfaceName}
 	result.Interfaces = []*current.Interface{hostIface, containerIface}
 	portUUID := uuid.New().String()
-	containerConfig := buildContainerConfig(hostIfaceName, containerID, testPodNameA, testPodNamespace, containerIface, result.IPs, 0)
+	containerConfig := buildContainerConfig(hostIfaceName, containerID, testPodNameA, testPodNamespace, containerIface, "host-local", result.IPs, 0)
 	containerConfig.OVSPortConfig = &interfacestore.OVSPortConfig{PortUUID: portUUID}
 
 	ifaceStore.AddInterface(containerConfig)
@@ -599,7 +599,7 @@ func TestBuildOVSPortExternalIDs(t *testing.T) {
 	containerIP1 := net.ParseIP("10.1.2.100")
 	containerIP2 := net.ParseIP("2001:fd1a::2")
 	containerIPs := []net.IP{containerIP1, containerIP2}
-	containerConfig := interfacestore.NewContainerInterface("pod1-abcd", containerID, "test-1", "t1", containerMAC, containerIPs, 0)
+	containerConfig := interfacestore.NewContainerInterface("pod1-abcd", containerID, "test-1", "t1", "host-local", containerMAC, containerIPs, 0)
 	externalIds := BuildOVSPortExternalIDs(containerConfig)
 	parsedIP, existed := externalIds[ovsExternalIDIP]
 	parsedIPStr := parsedIP.(string)

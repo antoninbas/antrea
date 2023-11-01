@@ -20,6 +20,7 @@ import (
 	"net"
 	"strings"
 
+	cnitypes "github.com/containernetworking/cni/pkg/types"
 	current "github.com/containernetworking/cni/pkg/types/100"
 	"github.com/containernetworking/cni/pkg/version"
 	corev1 "k8s.io/api/core/v1"
@@ -28,12 +29,14 @@ import (
 
 	"antrea.io/antrea/pkg/agent/cniserver/ipam"
 	"antrea.io/antrea/pkg/agent/cniserver/types"
+	"antrea.io/antrea/pkg/agent/config"
 	"antrea.io/antrea/pkg/agent/interfacestore"
 	"antrea.io/antrea/pkg/agent/openflow"
 	"antrea.io/antrea/pkg/agent/route"
 	"antrea.io/antrea/pkg/agent/secondarynetwork/cnipodcache"
 	agenttypes "antrea.io/antrea/pkg/agent/types"
 	"antrea.io/antrea/pkg/agent/util"
+	cnipb "antrea.io/antrea/pkg/apis/cni/v1beta1"
 	"antrea.io/antrea/pkg/ovs/ovsconfig"
 	"antrea.io/antrea/pkg/util/channel"
 	"antrea.io/antrea/pkg/util/k8s"
@@ -51,6 +54,7 @@ const (
 	ovsExternalIDContainerID  = "container-id"
 	ovsExternalIDPodName      = "pod-name"
 	ovsExternalIDPodNamespace = "pod-namespace"
+	ovsExternalIDIPAMType     = "ipam-type"
 )
 
 const (
@@ -67,6 +71,7 @@ type podConfigurator struct {
 	ofClient        openflow.Client
 	routeClient     route.Interface
 	ifaceStore      interfacestore.InterfaceStore
+	nodeConfig      *config.NodeConfig
 	gatewayMAC      net.HardwareAddr
 	ifConfigurator  podInterfaceConfigurator
 	// podUpdateNotifier is used for notifying updates of local Pods to other components which may benefit from this
@@ -81,7 +86,7 @@ func newPodConfigurator(
 	ofClient openflow.Client,
 	routeClient route.Interface,
 	ifaceStore interfacestore.InterfaceStore,
-	gatewayMAC net.HardwareAddr,
+	nodeConfig *config.NodeConfig,
 	ovsDatapathType ovsconfig.OVSDatapathType,
 	isOvsHardwareOffloadEnabled bool,
 	disableTXChecksumOffload bool,
@@ -97,7 +102,8 @@ func newPodConfigurator(
 		ofClient:          ofClient,
 		routeClient:       routeClient,
 		ifaceStore:        ifaceStore,
-		gatewayMAC:        gatewayMAC,
+		nodeConfig:        nodeConfig,
+		gatewayMAC:        nodeConfig.GatewayConfig.MAC,
 		ifConfigurator:    ifConfigurator,
 		podUpdateNotifier: podUpdateNotifier,
 		podInfoStore:      podInfoStore,
@@ -118,6 +124,7 @@ func parseContainerIPs(ipcs []*current.IPConfig) ([]net.IP, error) {
 func buildContainerConfig(
 	interfaceName, containerID, podName, podNamespace string,
 	containerIface *current.Interface,
+	ipamType string,
 	ips []*current.IPConfig,
 	vlanID uint16) *interfacestore.InterfaceConfig {
 	containerIPs, err := parseContainerIPs(ips)
@@ -131,6 +138,7 @@ func buildContainerConfig(
 		containerID,
 		podName,
 		podNamespace,
+		ipamType,
 		containerMAC,
 		containerIPs,
 		vlanID)
@@ -145,6 +153,7 @@ func BuildOVSPortExternalIDs(containerConfig *interfacestore.InterfaceConfig) ma
 	externalIDs[ovsExternalIDIP] = getContainerIPsString(containerConfig.IPs)
 	externalIDs[ovsExternalIDPodName] = containerConfig.PodName
 	externalIDs[ovsExternalIDPodNamespace] = containerConfig.PodNamespace
+	externalIDs[ovsExternalIDIPAMType] = containerConfig.IPAMType
 	externalIDs[interfacestore.AntreaInterfaceTypeKey] = interfacestore.AntreaContainer
 	return externalIDs
 }
@@ -159,7 +168,7 @@ func getContainerIPsString(ips []net.IP) string {
 
 // ParseOVSPortInterfaceConfig reads the Pod properties saved in the OVS port
 // external_ids, initializes and returns an InterfaceConfig struct.
-// nill will be returned, if the OVS port does not have external IDs or it is
+// nil will be returned, if the OVS port does not have external IDs or it is
 // not created for a Pod interface.
 func ParseOVSPortInterfaceConfig(portData *ovsconfig.OVSPortData, portConfig *interfacestore.OVSPortConfig) *interfacestore.InterfaceConfig {
 	if portData.ExternalIDs == nil {
@@ -185,12 +194,14 @@ func ParseOVSPortInterfaceConfig(portData *ovsconfig.OVSPortData, portConfig *in
 	}
 	podName, _ := portData.ExternalIDs[ovsExternalIDPodName]
 	podNamespace, _ := portData.ExternalIDs[ovsExternalIDPodNamespace]
+	ipamType, _ := portData.ExternalIDs[ovsExternalIDIPAMType]
 
 	interfaceConfig := interfacestore.NewContainerInterface(
 		portData.Name,
 		containerID,
 		podName,
 		podNamespace,
+		ipamType,
 		containerMAC,
 		containerIPs,
 		portData.VLANID)
@@ -243,7 +254,7 @@ func (pc *podConfigurator) configureInterfaces(
 	}
 
 	var containerConfig *interfacestore.InterfaceConfig
-	if containerConfig, err = pc.connectInterfaceToOVS(podName, podNamespace, containerID, hostIface, containerIface, result.IPs, result.VLANID, containerAccess); err != nil {
+	if containerConfig, err = pc.connectInterfaceToOVS(podName, podNamespace, containerID, hostIface, containerIface, result.IPAMType, result.IPs, result.VLANID, containerAccess); err != nil {
 		return fmt.Errorf("failed to connect to ovs for container %s: %v", containerID, err)
 	}
 	defer func() {
@@ -458,6 +469,13 @@ func (pc *podConfigurator) reconcile(pods []corev1.Pod, containerAccess *contain
 				klog.Errorf("Error when re-installing flows for Pod %s", namespacedName)
 			}
 		} else {
+			// clean-up ipam allocation
+			if containerConfig.IPAMType != "" {
+				klog.InfoS("Deleting IPAM allocation for container if it exists", "pod", klog.KRef(containerConfig.PodNamespace, containerConfig.PodName))
+				if err := pc.gcIPAM(containerConfig); err != nil {
+					klog.ErrorS(err, "failed to delete IPAM allocation", "pod", klog.KRef(containerConfig.PodNamespace, containerConfig.PodName))
+				}
+			}
 			// clean-up and delete interface
 			klog.V(4).Infof("Deleting interface %s", containerConfig.InterfaceName)
 			if err := pc.removeInterfaces(containerConfig.ContainerID); err != nil {
@@ -468,6 +486,53 @@ func (pc *podConfigurator) reconcile(pods []corev1.Pod, containerAccess *contain
 	}
 	if len(missingIfConfigs) > 0 {
 		pc.reconcileMissingPods(missingIfConfigs, containerAccess)
+	}
+	return nil
+}
+
+// gcIPAM should upport both the IPAM delegator and AntreaIPAM
+func (pc *podConfigurator) gcIPAM(containerConfig *interfacestore.InterfaceConfig) error {
+	networkConfig := &types.NetworkConfig{
+		CNIVersion: version.Current(),
+		Name:       "antrea",
+		Type:       antreaCNIType,
+		IPAM: &types.IPAMConfig{
+			Type: containerConfig.IPAMType,
+		},
+	}
+	// Ranges are needed for host-local IPAM.
+	if (pc.nodeConfig.GatewayConfig.IPv4 != nil) && (pc.nodeConfig.PodIPv4CIDR != nil) {
+		networkConfig.IPAM.Ranges = append(networkConfig.IPAM.Ranges, types.RangeSet{types.Range{Subnet: pc.nodeConfig.PodIPv4CIDR.String(), Gateway: pc.nodeConfig.GatewayConfig.IPv4.String()}})
+	}
+	if (pc.nodeConfig.GatewayConfig.IPv6 != nil) && (pc.nodeConfig.PodIPv6CIDR != nil) {
+		networkConfig.IPAM.Ranges = append(networkConfig.IPAM.Ranges, types.RangeSet{types.Range{Subnet: pc.nodeConfig.PodIPv6CIDR.String(), Gateway: pc.nodeConfig.GatewayConfig.IPv6.String()}})
+	}
+	networkConfigBytes, err := json.Marshal(networkConfig)
+	if err != nil {
+		return err
+	}
+	args := &cnipb.CniCmdArgs{
+		ContainerId: containerConfig.ContainerID,
+		Ifname:      containerConfig.InterfaceName,
+		Args: fmt.Sprintf(
+			"IgnoreUnknown=1;K8S_POD_NAMESPACE=%s;K8S_POD_NAME=%s;K8S_POD_INFRA_CONTAINER_ID=%s",
+			containerConfig.PodNamespace,
+			containerConfig.PodName,
+			containerConfig.ContainerID,
+		),
+		NetworkConfiguration: networkConfigBytes,
+		// This cannot be empty, or the IPAM plugin will reject the request.
+		// However, the CNI_PATH env variable is only used for delegation, so the IPAM
+		// plugin is unlikely yo use it.
+		Path: ".",
+	}
+	k8sArgs := &types.K8sArgs{}
+	if err := cnitypes.LoadArgs(args.Args, k8sArgs); err != nil {
+		return err
+	}
+
+	if err := ipam.ExecIPAMDelete(args, k8sArgs, containerConfig.IPAMType, containerConfig.ContainerID); err != nil {
+		return err
 	}
 	return nil
 }
@@ -564,7 +629,7 @@ func (pc *podConfigurator) connectInterceptedInterface(
 		return fmt.Errorf("connectInterceptedInterface failed to migrate: %w", err)
 	}
 	_, err = pc.connectInterfaceToOVS(podName, podNamespace, containerID, hostIface,
-		containerIface, containerIPs, 0, containerAccess)
+		containerIface, "", containerIPs, 0, containerAccess)
 	return err
 }
 

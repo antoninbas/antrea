@@ -64,6 +64,8 @@ type ContainerInterfaceConfig struct {
 	ContainerID  string
 	PodName      string
 	PodNamespace string
+	// The IPAM driver used to allocate the container's IP addresses
+	IPAMType string
 }
 
 type TunnelInterfaceConfig struct {
@@ -133,20 +135,25 @@ func NewContainerInterface(
 	containerID string,
 	podName string,
 	podNamespace string,
+	ipamType string,
 	mac net.HardwareAddr,
 	ips []net.IP,
-	vlanID uint16) *InterfaceConfig {
+	vlanID uint16,
+) *InterfaceConfig {
 	containerConfig := &ContainerInterfaceConfig{
 		ContainerID:  containerID,
 		PodName:      podName,
-		PodNamespace: podNamespace}
+		PodNamespace: podNamespace,
+		IPAMType:     ipamType,
+	}
 	return &InterfaceConfig{
 		InterfaceName:            interfaceName,
 		Type:                     ContainerInterface,
 		IPs:                      ips,
 		MAC:                      mac,
 		VLANID:                   vlanID,
-		ContainerInterfaceConfig: containerConfig}
+		ContainerInterfaceConfig: containerConfig,
+	}
 }
 
 // NewGatewayInterface creates InterfaceConfig for the host gateway interface.

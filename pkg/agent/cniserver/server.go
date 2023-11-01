@@ -495,6 +495,7 @@ func (s *CNIServer) CmdAdd(ctx context.Context, request *cnipb.CniCmdRequest) (*
 	result.IPs = ipamResult.IPs
 	result.Routes = ipamResult.Routes
 	result.VLANID = ipamResult.VLANID
+	result.IPAMType = ipamResult.IPAMType
 	// Ensure interface gateway setting and mapping relations between result.Interfaces and result.IPs
 	updateResultIfaceConfig(&result.Result, s.nodeConfig.GatewayConfig.IPv4, s.nodeConfig.GatewayConfig.IPv6)
 	updateResultDNSConfig(&result.Result, cniConfig)
@@ -665,7 +666,7 @@ func (s *CNIServer) Initialize(
 	}
 
 	s.podConfigurator, err = newPodConfigurator(
-		ovsBridgeClient, ofClient, s.routeClient, ifaceStore, s.nodeConfig.GatewayConfig.MAC,
+		ovsBridgeClient, ofClient, s.routeClient, ifaceStore, s.nodeConfig,
 		ovsBridgeClient.GetOVSDatapathType(), ovsBridgeClient.IsHardwareOffloadEnabled(),
 		s.disableTXChecksumOffload,
 		podUpdateNotifier, podInfoStore)

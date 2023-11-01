@@ -144,6 +144,7 @@ func TestRemoveInterface(t *testing.T) {
 			containerID,
 			podName,
 			testPodNamespace,
+			"host-local",
 			containerMAC,
 			[]net.IP{containerIP},
 			0)
@@ -486,7 +487,7 @@ func TestCmdDel(t *testing.T) {
 			cniserver := newMockCNIServer(t, controller, ipamMock, tc.ipamType, tc.enableSecondaryNetworkIPAM, tc.isChaining, tc.secondaryNetworkEnabled)
 			requestMsg, hostInterfaceName := createCNIRequestAndInterfaceName(t, tc.podName, tc.cniType, ipamResult, tc.ipamType, true)
 			containerID := requestMsg.CniArgs.ContainerId
-			containerIfaceConfig := interfacestore.NewContainerInterface(hostInterfaceName, containerID, tc.podName, testPodNamespace, containerVethMac, []net.IP{net.ParseIP("10.1.2.100")}, 0)
+			containerIfaceConfig := interfacestore.NewContainerInterface(hostInterfaceName, containerID, tc.podName, testPodNamespace, tc.ipamType, containerVethMac, []net.IP{net.ParseIP("10.1.2.100")}, 0)
 			containerIfaceConfig.OVSPortConfig = &interfacestore.OVSPortConfig{PortUUID: ovsPortID, OFPort: ovsPort}
 			ifaceStore.AddInterface(containerIfaceConfig)
 			testIfaceConfigurator := newTestInterfaceConfigurator()
@@ -559,7 +560,7 @@ func TestCmdCheck(t *testing.T) {
 		}
 		podArgs := cniservertest.GenerateCNIArgs(name, testPodNamespace, testPodInfraContainerID)
 		requestMsg, containerID := newRequest(podArgs, networkCfg, "", t)
-		containerIfaceConfig := interfacestore.NewContainerInterface(hostInterfaceName, containerID, name, testPodNamespace, containerVethMac, []net.IP{net.ParseIP("10.1.2.100")}, 0)
+		containerIfaceConfig := interfacestore.NewContainerInterface(hostInterfaceName, containerID, name, testPodNamespace, ipamType, containerVethMac, []net.IP{net.ParseIP("10.1.2.100")}, 0)
 		containerIfaceConfig.OVSPortConfig = &interfacestore.OVSPortConfig{PortUUID: ovsPortID, OFPort: ovsPort}
 		ifaceStore.AddInterface(containerIfaceConfig)
 		return requestMsg, hostInterfaceName
