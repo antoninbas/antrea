@@ -15,7 +15,7 @@ on:
 
 jobs:
   build:
-    if: github.repository == 'antrea-io/antrea'
+    if: github.repository == 'antoninbas/antrea'
     runs-on: ubuntu-latest
     steps:
     - name: Find greatest Antrea version
@@ -91,7 +91,7 @@ jobs:
         path: trivy.*.txt
         retention-days: 90 # max value
   skip:
-    if: github.repository != 'antrea-io/antrea'
+    if: github.repository != 'antoninbas/antrea'
     runs-on: ubuntu-latest
     steps:
       - name: Skip
