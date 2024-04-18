@@ -11,6 +11,7 @@ on:
       - main
       - release-*
       - feature/*
+      - use-reserved-controller-ports-for-default-antrea-ports-test
 
 jobs:
   check-changes:
@@ -127,13 +128,13 @@ jobs:
     - name: Build Antrea Windows Docker image
       run: make build-windows
     - name: Push Antrea Windows Docker image to registry
-      if: ${{ github.repository == 'antrea-io/antrea' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       env:
         DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
       run: |
         echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-        docker push antrea/antrea-windows:latest
+        docker tag antrea/antrea-windows:latest antoninbas/antrea-windows:test6202
+        docker push antoninbas/antrea-windows:test6202
       shell: bash
 
   build-antrea-mc-controller:
