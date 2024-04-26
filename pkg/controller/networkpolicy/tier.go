@@ -121,17 +121,21 @@ var (
 func (n *NetworkPolicyController) InitializeTiers() {
 	for _, t := range systemGeneratedTiers {
 		// Check if Tier is already present.
-		oldTier, err := n.tierLister.Get(t.Name)
+		currentTier, err := n.tierLister.Get(t.Name)
 		if err == nil {
 			// Tier is already present.
-			klog.V(2).Infof("%s Tier already created", t.Name)
-			// Update Tier Priority if it is not set to desired Priority.
+			klog.V(2).InfoS("System tier already exists", "tier", klog.KObj(currentTier))
+			// Update Tier Priority if it is not set to desired Priority.  Unconditional
+			// UPDATE operation on system Tiers. It ensures that system Tiers always use
+			// the newest storage version, while also making sure that the Tier priority
+			// value is what we expect.
 			expPrio := priorityMap[t.Name]
-			if oldTier.Spec.Priority != expPrio {
-				tToUpdate := oldTier.DeepCopy()
-				tToUpdate.Spec.Priority = expPrio
-				n.updateTier(tToUpdate)
+			updatedTier := currentTier
+			if currentTier.Spec.Priority != expPrio {
+				updatedTier = currentTier.DeepCopy()
+				updatedTier.Spec.Priority = expPrio
 			}
+			n.updateTier(updatedTier)
 			continue
 		}
 		n.initTier(t)
@@ -146,18 +150,18 @@ func (n *NetworkPolicyController) initTier(t *secv1beta1.Tier) {
 	backoff := 1 * time.Second
 	retryAttempt := 1
 	for {
-		klog.V(2).InfoS("Creating system Tier", "tier", t.Name)
+		klog.V(2).InfoS("Creating system Tier", "tier", klog.KObj(t))
 		_, err = n.crdClient.CrdV1beta1().Tiers().Create(context.TODO(), t, metav1.CreateOptions{})
 		// Attempt to recreate Tier after a backoff only if it does not exist.
 		if err != nil {
 			if errors.IsAlreadyExists(err) {
-				klog.InfoS("System Tier already exists", "tier", t.Name)
+				klog.InfoS("System Tier already exists", "tier", klog.KObj(t))
 				return
 			}
-			klog.InfoS("Failed to create system Tier on init, will retry", "tier", t.Name, "attempts", retryAttempt, "err", err)
+			klog.InfoS("Failed to create system Tier on init, will retry", "tier", klog.KObj(t), "attempts", retryAttempt, "err", err)
 			// Tier creation may fail because antrea APIService is not yet ready
-			// to accept requests for validation. Retry fixed number of times
-			// not exceeding 8s.
+			// to accept requests for validation. Retry unlimited number of times with
+			// a max backoff time of 8s.
 			time.Sleep(backoff)
 			backoff *= 2
 			if backoff > maxBackoffTime {
@@ -166,12 +170,12 @@ func (n *NetworkPolicyController) initTier(t *secv1beta1.Tier) {
 			retryAttempt += 1
 			continue
 		}
-		klog.InfoS("Created system Tier", "tier", t.Name)
+		klog.InfoS("Created system Tier", "tier", klog.KObj(t))
 		return
 	}
 }
 
-// updateTier attempts to update Tiers using an
+// updateTier attempts to update system Tiers until successful, using an
 // exponential backoff period from 1 to max of 8secs.
 func (n *NetworkPolicyController) updateTier(t *secv1beta1.Tier) {
 	var err error
@@ -179,14 +183,14 @@ func (n *NetworkPolicyController) updateTier(t *secv1beta1.Tier) {
 	backoff := 1 * time.Second
 	retryAttempt := 1
 	for {
-		klog.V(2).Infof("Updating %s Tier", t.Name)
+		klog.V(2).InfoS("Updating system Tier", "tier", klog.KObj(t))
 		_, err = n.crdClient.CrdV1beta1().Tiers().Update(context.TODO(), t, metav1.UpdateOptions{})
-		// Attempt to update Tier after a backoff.
+		// In case of err, re-attempt to update Tier after a backoff.
 		if err != nil {
-			klog.Warningf("Failed to update %s Tier on init: %v. Retry attempt: %d", t.Name, err, retryAttempt)
+			klog.InfoS("Failed to update system Tier on init, will retry", "tier", klog.KObj(t), "attempts", retryAttempt, "err", err)
 			// Tier update may fail because antrea APIService is not yet ready
-			// to accept requests for validation. Retry fixed number of times
-			// not exceeding 8s.
+			// to accept requests for validation. Retry unlimited number of times with
+			// a max backoff time of 8s.
 			time.Sleep(backoff)
 			backoff *= 2
 			if backoff > maxBackoffTime {
@@ -195,6 +199,7 @@ func (n *NetworkPolicyController) updateTier(t *secv1beta1.Tier) {
 			retryAttempt += 1
 			continue
 		}
+		klog.V(2).InfoS("Updated system Tier", "tier", klog.KObj(t))
 		return
 	}
 }
