@@ -100,6 +100,7 @@ var (
 )
 
 type flowAggregator struct {
+	aggregatorMode              flowaggregatorconfig.AggregatorMode
 	aggregatorTransportProtocol flowaggregatorconfig.AggregatorTransportProtocol
 	collectingProcess           ipfix.IPFIXCollectingProcess
 	aggregationProcess          ipfix.IPFIXAggregationProcess
@@ -156,6 +157,7 @@ func NewFlowAggregator(
 	}
 
 	fa := &flowAggregator{
+		aggregatorMode:              opt.AggregatorMode,
 		aggregatorTransportProtocol: opt.AggregatorTransportProtocol,
 		activeFlowRecordTimeout:     opt.ActiveFlowRecordTimeout,
 		inactiveFlowRecordTimeout:   opt.InactiveFlowRecordTimeout,
@@ -175,9 +177,10 @@ func NewFlowAggregator(
 	if err != nil {
 		return nil, fmt.Errorf("error when creating collecting process: %v", err)
 	}
-	err = fa.InitAggregationProcess()
-	if err != nil {
-		return nil, fmt.Errorf("error when creating aggregation process: %v", err)
+	if opt.AggregatorMode == flowaggregatorconfig.AggregatorModeAggregate {
+		if err := fa.InitAggregationProcess(); err != nil {
+			return nil, fmt.Errorf("error when creating aggregation process: %w", err)
+		}
 	}
 	if opt.Config.ClickHouse.Enable {
 		var err error
@@ -253,8 +256,16 @@ func (fa *flowAggregator) InitCollectingProcess() error {
 			IsEncrypted:   false,
 		}
 	}
-	cpInput.NumExtraElements = len(infoelements.AntreaSourceStatsElementList) + len(infoelements.AntreaDestinationStatsElementList) + len(infoelements.AntreaLabelsElementList) +
-		len(infoelements.AntreaFlowEndSecondsElementList) + len(infoelements.AntreaThroughputElementList) + len(infoelements.AntreaSourceThroughputElementList) + len(infoelements.AntreaDestinationThroughputElementList)
+	if fa.includePodLabels {
+		cpInput.NumExtraElements += len(infoelements.AntreaLabelsElementList)
+	}
+	if fa.aggregatorMode == flowaggregatorconfig.AggregatorModeAggregate {
+		cpInput.NumExtraElements += len(infoelements.AntreaSourceStatsElementList) + len(infoelements.AntreaDestinationStatsElementList) +
+			len(infoelements.AntreaFlowEndSecondsElementList) + len(infoelements.AntreaThroughputElementList) + len(infoelements.AntreaSourceThroughputElementList) + len(infoelements.AntreaDestinationThroughputElementList)
+	} else {
+		// The only element we need to add is originalObservationDomainId.
+		cpInput.NumExtraElements += 1
+	}
 	var err error
 	fa.collectingProcess, err = collector.InitCollectingProcess(cpInput)
 	return err
@@ -286,13 +297,15 @@ func (fa *flowAggregator) Run(stopCh <-chan struct{}) {
 		// blocking function, will return when fa.collectingProcess.Stop() is called
 		fa.collectingProcess.Start()
 	}()
-	ipfixProcessesWg.Add(1)
-	go func() {
-		// Same comment as above.
-		defer ipfixProcessesWg.Done()
-		// blocking function, will return when fa.aggregationProcess.Stop() is called
-		fa.aggregationProcess.Start()
-	}()
+	if fa.aggregationProcess != nil {
+		ipfixProcessesWg.Add(1)
+		go func() {
+			// Same comment as above.
+			defer ipfixProcessesWg.Done()
+			// blocking function, will return when fa.aggregationProcess.Stop() is called
+			fa.aggregationProcess.Start()
+		}()
+	}
 
 	if fa.ipfixExporter != nil {
 		fa.ipfixExporter.Start()
@@ -352,10 +365,6 @@ func (fa *flowAggregator) Run(stopCh <-chan struct{}) {
 // function, hence preventing any concurrency issue as the exporter.Interface
 // implementations are not safe for concurrent access.
 func (fa *flowAggregator) flowExportLoop(stopCh <-chan struct{}) {
-	expireTimer := time.NewTimer(fa.activeFlowRecordTimeout)
-	defer expireTimer.Stop()
-	logTicker := time.NewTicker(fa.logTickerDuration)
-	defer logTicker.Stop()
 	defer func() {
 		// We stop the exporters from flowExportLoop and not from Run,
 		// to avoid any possible race condition.
@@ -372,6 +381,110 @@ func (fa *flowAggregator) flowExportLoop(stopCh <-chan struct{}) {
 			fa.logExporter.Stop()
 		}
 	}()
+	if fa.aggregatorMode == flowaggregatorconfig.AggregatorModeAggregate {
+		fa.flowExportLoopAggregate(stopCh)
+	} else if fa.aggregatorMode == flowaggregatorconfig.AggregatorModeProxy {
+		fa.flowExportLoopProxy(stopCh)
+	}
+}
+
+func (fa *flowAggregator) flowExportLoopProxy(stopCh <-chan struct{}) {
+	logTicker := time.NewTicker(fa.logTickerDuration)
+	defer logTicker.Stop()
+	msgCh := fa.collectingProcess.GetMsgChan()
+
+	getAddress := func(record ipfixentities.Record, name string) string {
+		element, _, exist := record.GetInfoElementWithValue(name)
+		if !exist {
+			return ""
+		}
+		return element.GetIPAddressValue().String()
+	}
+
+	proxyRecord := func(record ipfixentities.Record, obsDomainID uint32) error {
+		sourceIPv4Address := getAddress(record, "sourceIPv4Address")
+		sourceIPv6Address := getAddress(record, "sourceIPv6Address")
+		destinationIPv4Address := getAddress(record, "destinationIPv4Address")
+		destinationIPv6Address := getAddress(record, "destinationIPv6Address")
+		var isIPv6 bool
+		var sourceAddress, destinationAddress string
+		switch {
+		case sourceIPv4Address != "" && sourceIPv6Address == "" && destinationIPv4Address != "" && destinationIPv6Address == "":
+			isIPv6 = false
+			sourceAddress = sourceIPv4Address
+			destinationAddress = destinationIPv4Address
+		case sourceIPv4Address == "" && sourceIPv6Address != "" && destinationIPv4Address == "" && destinationIPv6Address != "":
+			isIPv6 = true
+			sourceAddress = sourceIPv6Address
+			destinationAddress = destinationIPv6Address
+		default:
+			// All other cases are invalid.
+			return fmt.Errorf("invalid format for record: source and destination must be present and IPv4 / IPv6 fields are mutually-exclusive")
+		}
+		startTime, err := fa.getRecordStartTime(record)
+		if err != nil {
+			return fmt.Errorf("cannot find record start time: %w", err)
+		}
+		fa.fillK8sMetadata(sourceAddress, destinationAddress, record, startTime)
+		if fa.includePodLabels {
+			fa.fillPodLabels(sourceAddress, destinationAddress, record, startTime)
+		}
+		if err := fa.addOriginalObservationDomainID(record, obsDomainID); err != nil {
+			klog.ErrorS(err, "Failed to add originalObservationDomainId")
+		}
+		return fa.sendRecord(record, isIPv6)
+	}
+
+	proxyRecords := func(msg *ipfixentities.Message) {
+		set := msg.GetSet()
+		if set.GetSetType() != ipfixentities.Data { // only process data records
+			return
+		}
+
+		records := set.GetRecords()
+		for _, record := range records {
+			if err := proxyRecord(record, msg.GetObsDomainID()); err != nil {
+				klog.ErrorS(err, "Failed to proxy record")
+			}
+		}
+	}
+
+	updateCh := fa.updateCh
+	for {
+		select {
+		case <-stopCh:
+			return
+		case msg, ok := <-msgCh:
+			if !ok {
+				msgCh = nil
+				break
+			}
+			proxyRecords(msg)
+		case <-logTicker.C:
+			// Add visibility of processing stats of Flow Aggregator
+			klog.V(4).InfoS("Total number of records received", "count", fa.collectingProcess.GetNumRecordsReceived())
+			klog.V(4).InfoS("Total number of records exported by each active exporter", "count", fa.numRecordsExported)
+			klog.V(4).InfoS("Number of exporters connected with Flow Aggregator", "count", fa.collectingProcess.GetNumConnToCollector())
+		case opt, ok := <-updateCh:
+			if !ok {
+				// set the channel to nil and essentially disable this select case.
+				// we could also just return straightaway as this should only happen
+				// when stopCh is closed, but maybe it's better to keep stopCh as
+				// the only signal for stopping the event loop.
+				updateCh = nil
+				break
+			}
+			fa.updateFlowAggregator(opt)
+		}
+	}
+}
+
+func (fa *flowAggregator) flowExportLoopAggregate(stopCh <-chan struct{}) {
+	expireTimer := time.NewTimer(fa.activeFlowRecordTimeout)
+	defer expireTimer.Stop()
+	logTicker := time.NewTicker(fa.logTickerDuration)
+	defer logTicker.Stop()
+
 	updateCh := fa.updateCh
 	for {
 		select {
@@ -380,7 +493,7 @@ func (fa *flowAggregator) flowExportLoop(stopCh <-chan struct{}) {
 		case <-expireTimer.C:
 			// Pop the flow record item from expire priority queue in the Aggregation
 			// Process and send the flow records.
-			if err := fa.aggregationProcess.ForAllExpiredFlowRecordsDo(fa.sendFlowKeyRecord); err != nil {
+			if err := fa.aggregationProcess.ForAllExpiredFlowRecordsDo(fa.sendAggregatedRecord); err != nil {
 				klog.ErrorS(err, "Error when sending expired flow records")
 				expireTimer.Reset(fa.activeFlowRecordTimeout)
 				continue
@@ -407,55 +520,62 @@ func (fa *flowAggregator) flowExportLoop(stopCh <-chan struct{}) {
 	}
 }
 
-func (fa *flowAggregator) sendFlowKeyRecord(key ipfixintermediate.FlowKey, record *ipfixintermediate.AggregationFlowRecord) error {
+func (fa *flowAggregator) sendRecord(record ipfixentities.Record, isRecordIPv6 bool) error {
+	if fa.ipfixExporter != nil {
+		if err := fa.ipfixExporter.AddRecord(record, isRecordIPv6); err != nil {
+			return err
+		}
+	}
+	if fa.clickHouseExporter != nil {
+		if err := fa.clickHouseExporter.AddRecord(record, isRecordIPv6); err != nil {
+			return err
+		}
+	}
+	if fa.s3Exporter != nil {
+		if err := fa.s3Exporter.AddRecord(record, isRecordIPv6); err != nil {
+			return err
+		}
+	}
+	if fa.logExporter != nil {
+		if err := fa.logExporter.AddRecord(record, isRecordIPv6); err != nil {
+			return err
+		}
+	}
+	fa.numRecordsExported = fa.numRecordsExported + 1
+	return nil
+}
+
+func (fa *flowAggregator) sendAggregatedRecord(key ipfixintermediate.FlowKey, record *ipfixintermediate.AggregationFlowRecord) error {
 	isRecordIPv4 := fa.aggregationProcess.IsAggregatedRecordIPv4(*record)
 	startTime, err := fa.getRecordStartTime(record.Record)
 	if err != nil {
 		return fmt.Errorf("cannot find record start time: %v", err)
 	}
 	if !fa.aggregationProcess.AreCorrelatedFieldsFilled(*record) {
-		fa.fillK8sMetadata(key, record.Record, *startTime)
+		fa.fillK8sMetadata(key.SourceAddress, key.DestinationAddress, record.Record, startTime)
 		fa.aggregationProcess.SetCorrelatedFieldsFilled(record, true)
 	}
 	// Even if fa.includePodLabels is false, we still need to add an empty IE to match the template.
 	if !fa.aggregationProcess.AreExternalFieldsFilled(*record) {
-		fa.fillPodLabels(key, record.Record, *startTime)
+		fa.fillPodLabels(key.SourceAddress, key.DestinationAddress, record.Record, startTime)
 		fa.aggregationProcess.SetExternalFieldsFilled(record, true)
 	}
-	if fa.ipfixExporter != nil {
-		if err := fa.ipfixExporter.AddRecord(record.Record, !isRecordIPv4); err != nil {
-			return err
-		}
-	}
-	if fa.clickHouseExporter != nil {
-		if err := fa.clickHouseExporter.AddRecord(record.Record, !isRecordIPv4); err != nil {
-			return err
-		}
-	}
-	if fa.s3Exporter != nil {
-		if err := fa.s3Exporter.AddRecord(record.Record, !isRecordIPv4); err != nil {
-			return err
-		}
-	}
-	if fa.logExporter != nil {
-		if err := fa.logExporter.AddRecord(record.Record, !isRecordIPv4); err != nil {
-			return err
-		}
+	if err := fa.sendRecord(record.Record, !isRecordIPv4); err != nil {
+		return err
 	}
 	if err := fa.aggregationProcess.ResetStatAndThroughputElementsInRecord(record.Record); err != nil {
 		return err
 	}
-	fa.numRecordsExported = fa.numRecordsExported + 1
 	return nil
 }
 
 // fillK8sMetadata fills Pod name, Pod namespace and Node name for inter-Node flows
 // that have incomplete info due to deny network policy.
-func (fa *flowAggregator) fillK8sMetadata(key ipfixintermediate.FlowKey, record ipfixentities.Record, startTime time.Time) {
+func (fa *flowAggregator) fillK8sMetadata(sourceAddress, destinationAddress string, record ipfixentities.Record, startTime time.Time) {
 	// fill source Pod info when sourcePodName is empty
 	if sourcePodName, _, exist := record.GetInfoElementWithValue("sourcePodName"); exist {
 		if sourcePodName.GetStringValue() == "" {
-			pod, exist := fa.podStore.GetPodByIPAndTime(key.SourceAddress, startTime)
+			pod, exist := fa.podStore.GetPodByIPAndTime(sourceAddress, startTime)
 			if exist {
 				sourcePodName.SetStringValue(pod.Name)
 				if sourcePodNamespace, _, exist := record.GetInfoElementWithValue("sourcePodNamespace"); exist {
@@ -465,14 +585,14 @@ func (fa *flowAggregator) fillK8sMetadata(key ipfixintermediate.FlowKey, record 
 					sourceNodeName.SetStringValue(pod.Spec.NodeName)
 				}
 			} else {
-				klog.ErrorS(nil, "Cannot find Pod information", "sourceAddress", key.SourceAddress, "flowStartTime", startTime)
+				klog.ErrorS(nil, "Cannot find Pod information", "sourceAddress", sourceAddress, "flowStartTime", startTime)
 			}
 		}
 	}
 	// fill destination Pod info when destinationPodName is empty
 	if destinationPodName, _, exist := record.GetInfoElementWithValue("destinationPodName"); exist {
 		if destinationPodName.GetStringValue() == "" {
-			pod, exist := fa.podStore.GetPodByIPAndTime(key.DestinationAddress, startTime)
+			pod, exist := fa.podStore.GetPodByIPAndTime(destinationAddress, startTime)
 			if exist {
 				destinationPodName.SetStringValue(pod.Name)
 				if destinationPodNamespace, _, exist := record.GetInfoElementWithValue("destinationPodNamespace"); exist {
@@ -482,19 +602,19 @@ func (fa *flowAggregator) fillK8sMetadata(key ipfixintermediate.FlowKey, record 
 					destinationNodeName.SetStringValue(pod.Spec.NodeName)
 				}
 			} else {
-				klog.ErrorS(nil, "Cannot find Pod information", "destinationAddress", key.DestinationAddress, "flowStartTime", startTime)
+				klog.ErrorS(nil, "Cannot find Pod information", "destinationAddress", destinationAddress, "flowStartTime", startTime)
 			}
 		}
 	}
 }
 
-func (fa *flowAggregator) getRecordStartTime(record ipfixentities.Record) (*time.Time, error) {
+func (fa *flowAggregator) getRecordStartTime(record ipfixentities.Record) (time.Time, error) {
 	flowStartSeconds, _, exist := record.GetInfoElementWithValue("flowStartSeconds")
 	if !exist {
-		return nil, fmt.Errorf("flowStartSeconds filed is empty")
+		return time.Time{}, fmt.Errorf("flowStartSeconds filed is empty")
 	}
 	startTime := time.Unix(int64(flowStartSeconds.GetUnsigned32Value()), 0)
-	return &startTime, nil
+	return startTime, nil
 }
 
 func (fa *flowAggregator) fetchPodLabels(ip string, startTime time.Time) string {
@@ -546,24 +666,45 @@ func (fa *flowAggregator) fillPodLabelsForSide(ip string, record ipfixentities.R
 	return nil
 }
 
-func (fa *flowAggregator) fillPodLabels(key ipfixintermediate.FlowKey, record ipfixentities.Record, startTime time.Time) {
-	if err := fa.fillPodLabelsForSide(key.SourceAddress, record, startTime, "sourcePodNamespace", "sourcePodName", "sourcePodLabels"); err != nil {
+func (fa *flowAggregator) fillPodLabels(sourceAddress, destinationAddress string, record ipfixentities.Record, startTime time.Time) {
+	if err := fa.fillPodLabelsForSide(sourceAddress, record, startTime, "sourcePodNamespace", "sourcePodName", "sourcePodLabels"); err != nil {
 		klog.ErrorS(err, "Error when filling Pod labels", "side", "source")
 	}
-	if err := fa.fillPodLabelsForSide(key.DestinationAddress, record, startTime, "destinationPodNamespace", "destinationPodName", "destinationPodLabels"); err != nil {
+	if err := fa.fillPodLabelsForSide(destinationAddress, record, startTime, "destinationPodNamespace", "destinationPodName", "destinationPodLabels"); err != nil {
 		klog.ErrorS(err, "Error when filling Pod labels", "side", "destination")
 	}
 }
 
+func (fa *flowAggregator) addOriginalObservationDomainID(record ipfixentities.Record, obsDomainID uint32) error {
+	ie, err := fa.registry.GetInfoElement("originalObservationDomainId", ipfixregistry.IANAEnterpriseID)
+	if err != nil {
+		return fmt.Errorf("error when getting originalObservationDomainId InfoElement: %w", err)
+	}
+	if err := record.AddInfoElement(ipfixentities.NewUnsigned32InfoElement(ie, obsDomainID)); err != nil {
+		return fmt.Errorf("error when adding originalObservationDomainId InfoElement with value: %w", err)
+	}
+	return nil
+}
+
 func (fa *flowAggregator) GetFlowRecords(flowKey *ipfixintermediate.FlowKey) []map[string]interface{} {
-	return fa.aggregationProcess.GetRecords(flowKey)
+	if fa.aggregationProcess != nil {
+		return fa.aggregationProcess.GetRecords(flowKey)
+	}
+	return nil
+}
+
+func (fa *flowAggregator) getNumFlows() int64 {
+	if fa.aggregationProcess != nil {
+		return fa.aggregationProcess.GetNumFlows()
+	}
+	return 0
 }
 
 func (fa *flowAggregator) GetRecordMetrics() querier.Metrics {
 	return querier.Metrics{
 		NumRecordsExported:     fa.numRecordsExported,
 		NumRecordsReceived:     fa.collectingProcess.GetNumRecordsReceived(),
-		NumFlows:               fa.aggregationProcess.GetNumFlows(),
+		NumFlows:               fa.getNumFlows(),
 		NumConnToCollector:     fa.collectingProcess.GetNumConnToCollector(),
 		WithClickHouseExporter: fa.clickHouseExporter != nil,
 		WithS3Exporter:         fa.s3Exporter != nil,

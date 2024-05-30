@@ -57,7 +57,7 @@ func init() {
 	ipfixregistry.LoadRegistry()
 }
 
-func TestFlowAggregator_sendFlowKeyRecord(t *testing.T) {
+func TestFlowAggregator_sendAggregatedRecord(t *testing.T) {
 	ipv4Key := ipfixintermediate.FlowKey{
 		SourceAddress:      "10.0.0.1",
 		DestinationAddress: "10.0.0.2",
@@ -188,7 +188,7 @@ func TestFlowAggregator_sendFlowKeyRecord(t *testing.T) {
 			mockAggregationProcess.EXPECT().SetExternalFieldsFilled(flowRecord, true)
 			mockAggregationProcess.EXPECT().IsAggregatedRecordIPv4(*flowRecord).Return(!tc.isIPv6)
 
-			err := fa.sendFlowKeyRecord(tc.flowKey, flowRecord)
+			err := fa.sendAggregatedRecord(tc.flowKey, flowRecord)
 			assert.NoError(t, err, "Error when sending flow key record, key: %v, record: %v", tc.flowKey, flowRecord)
 		})
 	}
@@ -537,6 +537,7 @@ func TestFlowAggregator_Run(t *testing.T) {
 	}
 
 	flowAggregator := &flowAggregator{
+		aggregatorMode: flowaggregatorconfig.AggregatorModeAggregate,
 		// must be large enough to avoid a call to ForAllExpiredFlowRecordsDo
 		activeFlowRecordTimeout: 1 * time.Hour,
 		logTickerDuration:       1 * time.Hour,
@@ -908,10 +909,8 @@ func TestFlowAggregator_fillK8sMetadata(t *testing.T) {
 	stopCh := make(chan struct{})
 	defer close(stopCh)
 
-	ipv4Key := ipfixintermediate.FlowKey{
-		SourceAddress:      "192.168.1.2",
-		DestinationAddress: "192.168.1.3",
-	}
+	sourceAdress := "192.168.1.2"
+	destinationAddress := "192.168.1.3"
 
 	fa := &flowAggregator{
 		podStore: mockPodStore,
@@ -926,5 +925,5 @@ func TestFlowAggregator_fillK8sMetadata(t *testing.T) {
 	mockPodStore.EXPECT().GetPodByIPAndTime("192.168.1.2", gomock.Any()).Return(srcPod, true)
 	mockPodStore.EXPECT().GetPodByIPAndTime("192.168.1.3", gomock.Any()).Return(dstPod, true)
 
-	fa.fillK8sMetadata(ipv4Key, mockRecord, time.Now())
+	fa.fillK8sMetadata(sourceAdress, destinationAddress, mockRecord, time.Now())
 }

@@ -66,6 +66,7 @@ func TestIPFIXExporter_sendTemplateSet(t *testing.T) {
 			templateIDv6:               testTemplateIDv6,
 			registry:                   mockIPFIXRegistry,
 			set:                        mockTempSet,
+			aggregatorMode:             flowaggregatorconfig.AggregatorModeAggregate,
 			observationDomainID:        testObservationDomainID,
 		}
 		elemList := createElementList(isIPv6, mockIPFIXRegistry)
@@ -117,13 +118,14 @@ func TestIPFIXExporter_UpdateOptions(t *testing.T) {
 			RecordFormat:        "IPFIX",
 		},
 	}
-	ipfixExporter := IPFIXExporter{
+	ipfixExporter := &IPFIXExporter{
 		config:                     config.FlowCollector,
 		externalFlowCollectorAddr:  "",
 		externalFlowCollectorProto: "",
 		templateIDv4:               testTemplateIDv4,
 		templateIDv6:               testTemplateIDv6,
 		set:                        mockTempSet,
+		aggregatorMode:             flowaggregatorconfig.AggregatorModeAggregate,
 		observationDomainID:        testObservationDomainID,
 	}
 	testTemplateID := testTemplateIDv4
@@ -177,12 +179,13 @@ func TestIPFIXExporter_AddRecord(t *testing.T) {
 		initIPFIXExportingProcess = initIPFIXExportingProcessSaved
 	}()
 
-	ipfixExporter := IPFIXExporter{
+	ipfixExporter := &IPFIXExporter{
 		externalFlowCollectorAddr:  "",
 		externalFlowCollectorProto: "",
 		templateIDv4:               testTemplateIDv4,
 		templateIDv6:               testTemplateIDv6,
 		set:                        mockTempSet,
+		aggregatorMode:             flowaggregatorconfig.AggregatorModeAggregate,
 		observationDomainID:        testObservationDomainID,
 	}
 	testTemplateID := testTemplateIDv4
@@ -211,9 +214,10 @@ func TestIPFIXExporter_initIPFIXExportingProcess_Error(t *testing.T) {
 		initIPFIXExportingProcess = initIPFIXExportingProcessSaved
 	}()
 
-	ipfixExporter := IPFIXExporter{
+	ipfixExporter := &IPFIXExporter{
 		externalFlowCollectorAddr:  "",
 		externalFlowCollectorProto: "",
+		aggregatorMode:             flowaggregatorconfig.AggregatorModeAggregate,
 	}
 
 	assert.Error(t, ipfixExporter.AddRecord(mockRecord, false))
@@ -226,13 +230,14 @@ func TestIPFIXExporter_sendRecord_Error(t *testing.T) {
 	mockTempSet := ipfixentitiestesting.NewMockSet(ctrl)
 	mockRecord := ipfixentitiestesting.NewMockRecord(ctrl)
 
-	ipfixExporter := IPFIXExporter{
+	ipfixExporter := &IPFIXExporter{
 		externalFlowCollectorAddr:  "",
 		externalFlowCollectorProto: "",
 		exportingProcess:           mockIPFIXExpProc,
 		templateIDv4:               testTemplateIDv4,
 		templateIDv6:               testTemplateIDv6,
 		set:                        mockTempSet,
+		aggregatorMode:             flowaggregatorconfig.AggregatorModeAggregate,
 		observationDomainID:        testObservationDomainID,
 	}
 	testTemplateID := testTemplateIDv4
@@ -299,7 +304,9 @@ func TestInitExportingProcess(t *testing.T) {
 		k8sClientset := fake.NewSimpleClientset()
 		ctrl := gomock.NewController(t)
 		mockIPFIXRegistry := ipfixtesting.NewMockIPFIXRegistry(ctrl)
-		opt := &options.Options{}
+		opt := &options.Options{
+			AggregatorMode: flowaggregatorconfig.AggregatorModeAggregate,
+		}
 		opt.Config = &flowaggregatorconfig.FlowAggregatorConfig{}
 		flowaggregatorconfig.SetConfigDefaults(opt.Config)
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -320,7 +327,9 @@ func TestInitExportingProcess(t *testing.T) {
 		k8sClientset := fake.NewSimpleClientset()
 		ctrl := gomock.NewController(t)
 		mockIPFIXRegistry := ipfixtesting.NewMockIPFIXRegistry(ctrl)
-		opt := &options.Options{}
+		opt := &options.Options{
+			AggregatorMode: flowaggregatorconfig.AggregatorModeAggregate,
+		}
 		opt.Config = &flowaggregatorconfig.FlowAggregatorConfig{}
 		flowaggregatorconfig.SetConfigDefaults(opt.Config)
 		udpAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
@@ -343,7 +352,9 @@ func TestInitExportingProcess(t *testing.T) {
 		k8sClientset := fake.NewSimpleClientset()
 		ctrl := gomock.NewController(t)
 		mockIPFIXRegistry := ipfixtesting.NewMockIPFIXRegistry(ctrl)
-		opt := &options.Options{}
+		opt := &options.Options{
+			AggregatorMode: flowaggregatorconfig.AggregatorModeAggregate,
+		}
 		opt.Config = &flowaggregatorconfig.FlowAggregatorConfig{}
 		flowaggregatorconfig.SetConfigDefaults(opt.Config)
 		// dialing this address is guaranteed to fail (we use 0 as the port number)
