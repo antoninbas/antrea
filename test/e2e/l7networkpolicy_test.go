@@ -413,10 +413,10 @@ func checkL7LoggingResult(t *testing.T, data *TestData, antreaPodName string, l7
 	t.Logf("Checking L7NP logs on Pod '%s'", antreaPodName)
 
 	if err := wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 30*time.Second, false, func(ctx context.Context) (bool, error) {
-		stdout, _, err := data.RunCommandFromPod(antreaNamespace, antreaPodName, "antrea-agent", cmd)
+		stdout, stderr, err := data.RunCommandFromPod(antreaNamespace, antreaPodName, "antrea-agent", cmd)
 		if err != nil {
 			// file may not exist yet
-			t.Logf("L7NP log file '%s' does not exist yet", l7LogFile)
+			t.Logf("Error when reading L7NP log file '%s', err: %v, stderr: %s", l7LogFile, err, stderr)
 			return false, nil
 		}
 
