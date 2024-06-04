@@ -343,7 +343,7 @@ func testL7NetworkPolicyTLS(t *testing.T, data *TestData) {
 }
 
 func testL7NetworkPolicyLogging(t *testing.T, data *TestData) {
-	l7LoggingNode := workerNodeName(1)
+	l7LoggingNode := nodeName(0)
 
 	clientPodName := "test-l7-logging-client-selected"
 	clientPodLabels := map[string]string{"test-l7-logging-e2e": "client"}
@@ -363,7 +363,7 @@ func testL7NetworkPolicyLogging(t *testing.T, data *TestData) {
 	l7LogFile := path.Join(logDir, "l7engine", fmt.Sprintf("eve-%s.json", time.Now().Format(time.DateOnly)))
 
 	antreaPodName, err := data.getAntreaPodOnNode(l7LoggingNode)
-	require.NoError(t, err, "Error occurred when trying to get the Antrea Agent Pod running on Node %s", l7LoggingNode)
+	require.NoError(t, err, "Error occurred when trying to get the antrea-agent Pod running on Node %s", l7LoggingNode)
 	// Remove existing log file if applicable to avoid interference between test runs.
 	_, _, err = data.RunCommandFromPod(antreaNamespace, antreaPodName, "antrea-agent", []string{"rm", "-f", l7LogFile})
 	require.NoError(t, err)
