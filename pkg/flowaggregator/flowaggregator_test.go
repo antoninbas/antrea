@@ -16,6 +16,7 @@ package flowaggregator
 
 import (
 	"bytes"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -190,6 +191,137 @@ func TestFlowAggregator_sendAggregatedRecord(t *testing.T) {
 
 			err := fa.sendAggregatedRecord(tc.flowKey, flowRecord)
 			assert.NoError(t, err, "Error when sending flow key record, key: %v, record: %v", tc.flowKey, flowRecord)
+		})
+	}
+}
+
+func TestFlowAggregator_proxyRecord(t *testing.T) {
+	podA := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "podA",
+		},
+	}
+	podB := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "podB",
+		},
+	}
+
+	testcases := []struct {
+		name               string
+		isIPv6             bool
+		sourceAddress      string
+		destinationAddress string
+		includePodLabels   bool
+	}{
+		{
+			"IPv4_with_pod_labels",
+			false,
+			"10.0.0.1",
+			"10.0.0.2",
+			true,
+		},
+		{
+			"IPv6_with_pod_labels",
+			true,
+			"2001:0:3238:dfe1:63::fefb",
+			"2001:0:3238:dfe1:63::fefc",
+			true,
+		},
+		{
+			"IPv4_without_pod_labels",
+			false,
+			"10.0.0.1",
+			"10.0.0.2",
+			false,
+		},
+		{
+			"IPv6_without_pod_labels",
+			true,
+			"2001:0:3238:dfe1:63::fefb",
+			"2001:0:3238:dfe1:63::fefc",
+			false,
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			mockPodStore := podstoretest.NewMockInterface(ctrl)
+			mockIPFIXExporter := exportertesting.NewMockInterface(ctrl)
+			mockIPFIXRegistry := ipfixtesting.NewMockIPFIXRegistry(ctrl)
+			mockRecord := ipfixentitiestesting.NewMockRecord(ctrl)
+
+			newFlowAggregator := func(includePodLabels bool) *flowAggregator {
+				return &flowAggregator{
+					aggregatorMode:              flowaggregatorconfig.AggregatorModeProxy,
+					aggregatorTransportProtocol: "tcp",
+					activeFlowRecordTimeout:     testActiveTimeout,
+					inactiveFlowRecordTimeout:   testInactiveTimeout,
+					ipfixExporter:               mockIPFIXExporter,
+					registry:                    mockIPFIXRegistry,
+					flowAggregatorAddress:       "",
+					includePodLabels:            includePodLabels,
+					podStore:                    mockPodStore,
+				}
+			}
+
+			fa := newFlowAggregator(tc.includePodLabels)
+			mockIPFIXExporter.EXPECT().AddRecord(mockRecord, tc.isIPv6)
+
+			startTime := time.Now().Truncate(time.Second)
+
+			var sourceIPv4Address, sourceIPv6Address, destinationIPv4Address, destinationIPv6Address string
+			if tc.isIPv6 {
+				sourceIPv6Address = tc.sourceAddress
+				destinationIPv6Address = tc.destinationAddress
+			} else {
+				sourceIPv4Address = tc.sourceAddress
+				destinationIPv4Address = tc.destinationAddress
+			}
+			sourceIPv4AddressIE := ipfixentities.NewIPAddressInfoElement(ipfixentities.NewInfoElement("sourceIPv4Address", 0, ipfixentities.Ipv4Address, ipfixregistry.IANAEnterpriseID, 0), net.ParseIP(sourceIPv4Address))
+			mockRecord.EXPECT().GetInfoElementWithValue("sourceIPv4Address").Return(sourceIPv4AddressIE, 0, !tc.isIPv6)
+			destinationIPv4AddressIE := ipfixentities.NewIPAddressInfoElement(ipfixentities.NewInfoElement("destinationIPv4Address", 0, ipfixentities.Ipv4Address, ipfixregistry.IANAEnterpriseID, 0), net.ParseIP(destinationIPv4Address))
+			mockRecord.EXPECT().GetInfoElementWithValue("destinationIPv4Address").Return(destinationIPv4AddressIE, 0, !tc.isIPv6)
+			sourceIPv6AddressIE := ipfixentities.NewIPAddressInfoElement(ipfixentities.NewInfoElement("sourceIPv6Address", 0, ipfixentities.Ipv6Address, ipfixregistry.IANAEnterpriseID, 0), net.ParseIP(sourceIPv6Address))
+			mockRecord.EXPECT().GetInfoElementWithValue("sourceIPv6Address").Return(sourceIPv6AddressIE, 0, tc.isIPv6)
+			destinationIPv6AddressIE := ipfixentities.NewIPAddressInfoElement(ipfixentities.NewInfoElement("destinationIPv6Address", 0, ipfixentities.Ipv6Address, ipfixregistry.IANAEnterpriseID, 0), net.ParseIP(destinationIPv6Address))
+			mockRecord.EXPECT().GetInfoElementWithValue("destinationIPv6Address").Return(destinationIPv6AddressIE, 0, tc.isIPv6)
+
+			flowStartSecondsIE := ipfixentities.NewDateTimeSecondsInfoElement(ipfixentities.NewInfoElement("flowStartSeconds", 150, 14, ipfixregistry.IANAEnterpriseID, 4), uint32(startTime.Unix()))
+			mockRecord.EXPECT().GetInfoElementWithValue("flowStartSeconds").Return(flowStartSecondsIE, 0, true)
+			sourcePodNameIE := ipfixentities.NewStringInfoElement(ipfixentities.NewInfoElement("sourcePodName", 0, 0, ipfixregistry.AntreaEnterpriseID, 0), "podA")
+			mockRecord.EXPECT().GetInfoElementWithValue("sourcePodName").Return(sourcePodNameIE, 0, true).MinTimes(1)
+			destinationPodNameIE := ipfixentities.NewStringInfoElement(ipfixentities.NewInfoElement("destinationPodName", 0, 0, ipfixregistry.AntreaEnterpriseID, 0), "podB")
+			mockRecord.EXPECT().GetInfoElementWithValue("destinationPodName").Return(destinationPodNameIE, 0, true).MinTimes(1)
+			podLabels := ""
+			if tc.includePodLabels {
+				podLabels = "{}"
+				sourcePodNamespaceIE := ipfixentities.NewStringInfoElement(ipfixentities.NewInfoElement("sourcePodNamespace", 0, 0, ipfixregistry.AntreaEnterpriseID, 0), "default")
+				mockRecord.EXPECT().GetInfoElementWithValue("sourcePodNamespace").Return(sourcePodNamespaceIE, 0, true)
+				destinationPodNamespaceIE := ipfixentities.NewStringInfoElement(ipfixentities.NewInfoElement("destinationPodNamespace", 0, 0, ipfixregistry.AntreaEnterpriseID, 0), "default")
+				mockRecord.EXPECT().GetInfoElementWithValue("destinationPodNamespace").Return(destinationPodNamespaceIE, 0, true)
+				mockPodStore.EXPECT().GetPodByIPAndTime(tc.sourceAddress, startTime).Return(podA, true)
+				mockPodStore.EXPECT().GetPodByIPAndTime(tc.destinationAddress, startTime).Return(podB, true)
+			}
+			sourcePodLabelsElement := ipfixentities.NewInfoElement("sourcePodLabels", 0, ipfixentities.String, ipfixregistry.AntreaEnterpriseID, 0)
+			mockIPFIXRegistry.EXPECT().GetInfoElement("sourcePodLabels", ipfixregistry.AntreaEnterpriseID).Return(sourcePodLabelsElement, nil)
+			sourcePodLabelsIE := ipfixentities.NewStringInfoElement(sourcePodLabelsElement, podLabels)
+			mockRecord.EXPECT().AddInfoElement(sourcePodLabelsIE).Return(nil)
+			destinationPodLabelsElement := ipfixentities.NewInfoElement("destinationPodLabels", 0, ipfixentities.String, ipfixregistry.AntreaEnterpriseID, 0)
+			mockIPFIXRegistry.EXPECT().GetInfoElement("destinationPodLabels", ipfixregistry.AntreaEnterpriseID).Return(destinationPodLabelsElement, nil)
+			destinationPodLabelsIE := ipfixentities.NewStringInfoElement(destinationPodLabelsElement, podLabels)
+			mockRecord.EXPECT().AddInfoElement(destinationPodLabelsIE).Return(nil)
+
+			const obsDomainID = 123
+			originalObservationDomainIE := ipfixentities.NewInfoElement("originalObservationDomainId", 0, 0, ipfixregistry.IANAEnterpriseID, 4)
+			mockIPFIXRegistry.EXPECT().GetInfoElement("originalObservationDomainId", ipfixregistry.IANAEnterpriseID).Return(originalObservationDomainIE, nil)
+			mockRecord.EXPECT().AddInfoElement(ipfixentities.NewUnsigned32InfoElement(originalObservationDomainIE, obsDomainID))
+
+			err := fa.proxyRecord(mockRecord, obsDomainID)
+			assert.NoError(t, err, "Error when proxying flow record")
 		})
 	}
 }

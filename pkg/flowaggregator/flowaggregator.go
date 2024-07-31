@@ -256,9 +256,6 @@ func (fa *flowAggregator) InitCollectingProcess() error {
 			IsEncrypted:   false,
 		}
 	}
-	if fa.includePodLabels {
-		cpInput.NumExtraElements += len(infoelements.AntreaLabelsElementList)
-	}
 	if fa.aggregatorMode == flowaggregatorconfig.AggregatorModeAggregate {
 		cpInput.NumExtraElements += len(infoelements.AntreaSourceStatsElementList) + len(infoelements.AntreaDestinationStatsElementList) +
 			len(infoelements.AntreaFlowEndSecondsElementList) + len(infoelements.AntreaThroughputElementList) + len(infoelements.AntreaSourceThroughputElementList) + len(infoelements.AntreaDestinationThroughputElementList)
@@ -388,11 +385,7 @@ func (fa *flowAggregator) flowExportLoop(stopCh <-chan struct{}) {
 	}
 }
 
-func (fa *flowAggregator) flowExportLoopProxy(stopCh <-chan struct{}) {
-	logTicker := time.NewTicker(fa.logTickerDuration)
-	defer logTicker.Stop()
-	msgCh := fa.collectingProcess.GetMsgChan()
-
+func (fa *flowAggregator) proxyRecord(record ipfixentities.Record, obsDomainID uint32) error {
 	getAddress := func(record ipfixentities.Record, name string) string {
 		element, _, exist := record.GetInfoElementWithValue(name)
 		if !exist {
@@ -401,39 +394,41 @@ func (fa *flowAggregator) flowExportLoopProxy(stopCh <-chan struct{}) {
 		return element.GetIPAddressValue().String()
 	}
 
-	proxyRecord := func(record ipfixentities.Record, obsDomainID uint32) error {
-		sourceIPv4Address := getAddress(record, "sourceIPv4Address")
-		sourceIPv6Address := getAddress(record, "sourceIPv6Address")
-		destinationIPv4Address := getAddress(record, "destinationIPv4Address")
-		destinationIPv6Address := getAddress(record, "destinationIPv6Address")
-		var isIPv6 bool
-		var sourceAddress, destinationAddress string
-		switch {
-		case sourceIPv4Address != "" && sourceIPv6Address == "" && destinationIPv4Address != "" && destinationIPv6Address == "":
-			isIPv6 = false
-			sourceAddress = sourceIPv4Address
-			destinationAddress = destinationIPv4Address
-		case sourceIPv4Address == "" && sourceIPv6Address != "" && destinationIPv4Address == "" && destinationIPv6Address != "":
-			isIPv6 = true
-			sourceAddress = sourceIPv6Address
-			destinationAddress = destinationIPv6Address
-		default:
-			// All other cases are invalid.
-			return fmt.Errorf("invalid format for record: source and destination must be present and IPv4 / IPv6 fields are mutually-exclusive")
-		}
-		startTime, err := fa.getRecordStartTime(record)
-		if err != nil {
-			return fmt.Errorf("cannot find record start time: %w", err)
-		}
-		fa.fillK8sMetadata(sourceAddress, destinationAddress, record, startTime)
-		if fa.includePodLabels {
-			fa.fillPodLabels(sourceAddress, destinationAddress, record, startTime)
-		}
-		if err := fa.addOriginalObservationDomainID(record, obsDomainID); err != nil {
-			klog.ErrorS(err, "Failed to add originalObservationDomainId")
-		}
-		return fa.sendRecord(record, isIPv6)
+	sourceIPv4Address := getAddress(record, "sourceIPv4Address")
+	sourceIPv6Address := getAddress(record, "sourceIPv6Address")
+	destinationIPv4Address := getAddress(record, "destinationIPv4Address")
+	destinationIPv6Address := getAddress(record, "destinationIPv6Address")
+	var isIPv6 bool
+	var sourceAddress, destinationAddress string
+	switch {
+	case sourceIPv4Address != "" && sourceIPv6Address == "" && destinationIPv4Address != "" && destinationIPv6Address == "":
+		isIPv6 = false
+		sourceAddress = sourceIPv4Address
+		destinationAddress = destinationIPv4Address
+	case sourceIPv4Address == "" && sourceIPv6Address != "" && destinationIPv4Address == "" && destinationIPv6Address != "":
+		isIPv6 = true
+		sourceAddress = sourceIPv6Address
+		destinationAddress = destinationIPv6Address
+	default:
+		// All other cases are invalid.
+		return fmt.Errorf("invalid format for record: source and destination must be present and IPv4 / IPv6 fields are mutually-exclusive")
 	}
+	startTime, err := fa.getRecordStartTime(record)
+	if err != nil {
+		return fmt.Errorf("cannot find record start time: %w", err)
+	}
+	fa.fillK8sMetadata(sourceAddress, destinationAddress, record, startTime)
+	fa.fillPodLabels(sourceAddress, destinationAddress, record, startTime)
+	if err := fa.addOriginalObservationDomainID(record, obsDomainID); err != nil {
+		klog.ErrorS(err, "Failed to add originalObservationDomainId")
+	}
+	return fa.sendRecord(record, isIPv6)
+}
+
+func (fa *flowAggregator) flowExportLoopProxy(stopCh <-chan struct{}) {
+	logTicker := time.NewTicker(fa.logTickerDuration)
+	defer logTicker.Stop()
+	msgCh := fa.collectingProcess.GetMsgChan()
 
 	proxyRecords := func(msg *ipfixentities.Message) {
 		set := msg.GetSet()
@@ -443,7 +438,7 @@ func (fa *flowAggregator) flowExportLoopProxy(stopCh <-chan struct{}) {
 
 		records := set.GetRecords()
 		for _, record := range records {
-			if err := proxyRecord(record, msg.GetObsDomainID()); err != nil {
+			if err := fa.proxyRecord(record, msg.GetObsDomainID()); err != nil {
 				klog.ErrorS(err, "Failed to proxy record")
 			}
 		}
