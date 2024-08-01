@@ -209,39 +209,36 @@ func TestFlowAggregator_proxyRecord(t *testing.T) {
 		},
 	}
 
+	const sourceAddressIPv4 = "10.0.0.1"
+	const destinationAddressIPv4 = "10.0.0.2"
+	const sourceAddressIPv6 = "2001:0:3238:dfe1:63::fefb"
+	const destinationAddressIPv6 = "2001:0:3238:dfe1:63::fefc"
+	const nodeAddressIPv4 = "192.168.77.100"
+	const nodeAddressIPv6 = "fd3b:fcf5:3e92:d732::100"
+
 	testcases := []struct {
-		name               string
-		isIPv6             bool
-		sourceAddress      string
-		destinationAddress string
-		includePodLabels   bool
+		name             string
+		isIPv6           bool
+		includePodLabels bool
 	}{
 		{
 			"IPv4_with_pod_labels",
 			false,
-			"10.0.0.1",
-			"10.0.0.2",
 			true,
 		},
 		{
 			"IPv6_with_pod_labels",
 			true,
-			"2001:0:3238:dfe1:63::fefb",
-			"2001:0:3238:dfe1:63::fefc",
 			true,
 		},
 		{
 			"IPv4_without_pod_labels",
 			false,
-			"10.0.0.1",
-			"10.0.0.2",
 			false,
 		},
 		{
 			"IPv6_without_pod_labels",
 			true,
-			"2001:0:3238:dfe1:63::fefb",
-			"2001:0:3238:dfe1:63::fefc",
 			false,
 		},
 	}
@@ -273,13 +270,18 @@ func TestFlowAggregator_proxyRecord(t *testing.T) {
 
 			startTime := time.Now().Truncate(time.Second)
 
+			var sourceAddress, destinationAddress string
 			var sourceIPv4Address, sourceIPv6Address, destinationIPv4Address, destinationIPv6Address string
 			if tc.isIPv6 {
-				sourceIPv6Address = tc.sourceAddress
-				destinationIPv6Address = tc.destinationAddress
+				sourceAddress = sourceAddressIPv6
+				destinationAddress = destinationAddressIPv6
+				sourceIPv6Address = sourceAddressIPv6
+				destinationIPv6Address = destinationAddressIPv6
 			} else {
-				sourceIPv4Address = tc.sourceAddress
-				destinationIPv4Address = tc.destinationAddress
+				sourceAddress = sourceAddressIPv4
+				destinationAddress = destinationAddressIPv4
+				sourceIPv4Address = sourceAddressIPv4
+				destinationIPv4Address = destinationAddressIPv4
 			}
 			sourceIPv4AddressIE := ipfixentities.NewIPAddressInfoElement(ipfixentities.NewInfoElement("sourceIPv4Address", 0, ipfixentities.Ipv4Address, ipfixregistry.IANAEnterpriseID, 0), net.ParseIP(sourceIPv4Address))
 			mockRecord.EXPECT().GetInfoElementWithValue("sourceIPv4Address").Return(sourceIPv4AddressIE, 0, !tc.isIPv6)
@@ -303,8 +305,8 @@ func TestFlowAggregator_proxyRecord(t *testing.T) {
 				mockRecord.EXPECT().GetInfoElementWithValue("sourcePodNamespace").Return(sourcePodNamespaceIE, 0, true)
 				destinationPodNamespaceIE := ipfixentities.NewStringInfoElement(ipfixentities.NewInfoElement("destinationPodNamespace", 0, 0, ipfixregistry.AntreaEnterpriseID, 0), "default")
 				mockRecord.EXPECT().GetInfoElementWithValue("destinationPodNamespace").Return(destinationPodNamespaceIE, 0, true)
-				mockPodStore.EXPECT().GetPodByIPAndTime(tc.sourceAddress, startTime).Return(podA, true)
-				mockPodStore.EXPECT().GetPodByIPAndTime(tc.destinationAddress, startTime).Return(podB, true)
+				mockPodStore.EXPECT().GetPodByIPAndTime(sourceAddress, startTime).Return(podA, true)
+				mockPodStore.EXPECT().GetPodByIPAndTime(destinationAddress, startTime).Return(podB, true)
 			}
 			sourcePodLabelsElement := ipfixentities.NewInfoElement("sourcePodLabels", 0, ipfixentities.String, ipfixregistry.AntreaEnterpriseID, 0)
 			mockIPFIXRegistry.EXPECT().GetInfoElement("sourcePodLabels", ipfixregistry.AntreaEnterpriseID).Return(sourcePodLabelsElement, nil)
@@ -320,7 +322,26 @@ func TestFlowAggregator_proxyRecord(t *testing.T) {
 			mockIPFIXRegistry.EXPECT().GetInfoElement("originalObservationDomainId", ipfixregistry.IANAEnterpriseID).Return(originalObservationDomainIE, nil)
 			mockRecord.EXPECT().AddInfoElement(ipfixentities.NewUnsigned32InfoElement(originalObservationDomainIE, obsDomainID))
 
-			err := fa.proxyRecord(mockRecord, obsDomainID)
+			var exporterAddress string
+			var exporterAddressIPv4, exporterAddressIPv6 net.IP
+			if tc.isIPv6 {
+				exporterAddressIPv4 = net.IPv4zero
+				exporterAddressIPv6 = net.ParseIP(nodeAddressIPv6)
+				exporterAddress = nodeAddressIPv6
+			} else {
+				exporterAddressIPv4 = net.ParseIP(nodeAddressIPv4)
+				exporterAddressIPv6 = net.IPv6zero
+				exporterAddress = nodeAddressIPv4
+			}
+
+			originalExporterIPv6AddressIE := ipfixentities.NewInfoElement("originalExporterIPv6Address", 0, 0, ipfixregistry.IANAEnterpriseID, 16)
+			mockIPFIXRegistry.EXPECT().GetInfoElement("originalExporterIPv6Address", ipfixregistry.IANAEnterpriseID).Return(originalExporterIPv6AddressIE, nil)
+			mockRecord.EXPECT().AddInfoElement(ipfixentities.NewIPAddressInfoElement(originalExporterIPv6AddressIE, exporterAddressIPv6))
+			originalExporterIPv4AddressIE := ipfixentities.NewInfoElement("originalExporterIPv4Address", 0, 0, ipfixregistry.IANAEnterpriseID, 4)
+			mockIPFIXRegistry.EXPECT().GetInfoElement("originalExporterIPv4Address", ipfixregistry.IANAEnterpriseID).Return(originalExporterIPv4AddressIE, nil)
+			mockRecord.EXPECT().AddInfoElement(ipfixentities.NewIPAddressInfoElement(originalExporterIPv4AddressIE, exporterAddressIPv4))
+
+			err := fa.proxyRecord(mockRecord, obsDomainID, exporterAddress)
 			assert.NoError(t, err, "Error when proxying flow record")
 		})
 	}

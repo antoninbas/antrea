@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
@@ -260,8 +261,8 @@ func (fa *flowAggregator) InitCollectingProcess() error {
 		cpInput.NumExtraElements += len(infoelements.AntreaSourceStatsElementList) + len(infoelements.AntreaDestinationStatsElementList) +
 			len(infoelements.AntreaFlowEndSecondsElementList) + len(infoelements.AntreaThroughputElementList) + len(infoelements.AntreaSourceThroughputElementList) + len(infoelements.AntreaDestinationThroughputElementList)
 	} else {
-		// The only element we need to add is originalObservationDomainId.
-		cpInput.NumExtraElements += 1
+		// originalObservationDomainId, originalExporterIPv4Address, originalExporterIPv6Address
+		cpInput.NumExtraElements += 3
 	}
 	var err error
 	fa.collectingProcess, err = collector.InitCollectingProcess(cpInput)
@@ -385,7 +386,7 @@ func (fa *flowAggregator) flowExportLoop(stopCh <-chan struct{}) {
 	}
 }
 
-func (fa *flowAggregator) proxyRecord(record ipfixentities.Record, obsDomainID uint32) error {
+func (fa *flowAggregator) proxyRecord(record ipfixentities.Record, obsDomainID uint32, exporterAddress string) error {
 	getAddress := func(record ipfixentities.Record, name string) string {
 		element, _, exist := record.GetInfoElementWithValue(name)
 		if !exist {
@@ -422,6 +423,13 @@ func (fa *flowAggregator) proxyRecord(record ipfixentities.Record, obsDomainID u
 	if err := fa.addOriginalObservationDomainID(record, obsDomainID); err != nil {
 		klog.ErrorS(err, "Failed to add originalObservationDomainId")
 	}
+	originalExporterAddress := net.ParseIP(exporterAddress)
+	if err := fa.addOriginalExporterIPv4Address(record, originalExporterAddress); err != nil {
+		klog.ErrorS(err, "Failed to add originalExporterIPv4Address")
+	}
+	if err := fa.addOriginalExporterIPv6Address(record, originalExporterAddress); err != nil {
+		klog.ErrorS(err, "Failed to add originalExporterIPv6Address")
+	}
 	return fa.sendRecord(record, isIPv6)
 }
 
@@ -438,7 +446,7 @@ func (fa *flowAggregator) flowExportLoopProxy(stopCh <-chan struct{}) {
 
 		records := set.GetRecords()
 		for _, record := range records {
-			if err := fa.proxyRecord(record, msg.GetObsDomainID()); err != nil {
+			if err := fa.proxyRecord(record, msg.GetObsDomainID(), msg.GetExportAddress()); err != nil {
 				klog.ErrorS(err, "Failed to proxy record")
 			}
 		}
@@ -677,6 +685,34 @@ func (fa *flowAggregator) addOriginalObservationDomainID(record ipfixentities.Re
 	}
 	if err := record.AddInfoElement(ipfixentities.NewUnsigned32InfoElement(ie, obsDomainID)); err != nil {
 		return fmt.Errorf("error when adding originalObservationDomainId InfoElement with value: %w", err)
+	}
+	return nil
+}
+
+func (fa *flowAggregator) addOriginalExporterIPv4Address(record ipfixentities.Record, address net.IP) error {
+	if address.To4() == nil {
+		address = net.IPv4zero
+	}
+	ie, err := fa.registry.GetInfoElement("originalExporterIPv4Address", ipfixregistry.IANAEnterpriseID)
+	if err != nil {
+		return fmt.Errorf("error when getting originalExporterIPv4Address InfoElement: %w", err)
+	}
+	if err := record.AddInfoElement(ipfixentities.NewIPAddressInfoElement(ie, address)); err != nil {
+		return fmt.Errorf("error when adding originalExporterIPv4Address InfoElement with value: %w", err)
+	}
+	return nil
+}
+
+func (fa *flowAggregator) addOriginalExporterIPv6Address(record ipfixentities.Record, address net.IP) error {
+	if address.To4() != nil {
+		address = net.IPv6zero
+	}
+	ie, err := fa.registry.GetInfoElement("originalExporterIPv6Address", ipfixregistry.IANAEnterpriseID)
+	if err != nil {
+		return fmt.Errorf("error when getting originalExporterIPv6Address InfoElement: %w", err)
+	}
+	if err := record.AddInfoElement(ipfixentities.NewIPAddressInfoElement(ie, address)); err != nil {
+		return fmt.Errorf("error when adding originalExporterIPv6Address InfoElement with value: %w", err)
 	}
 	return nil
 }

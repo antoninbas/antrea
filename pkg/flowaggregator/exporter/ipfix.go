@@ -342,6 +342,16 @@ func (e *IPFIXExporter) sendTemplateSet(isIPv6 bool) (int, error) {
 			return 0, err
 		}
 		elements = append(elements, ie)
+		ie, err = e.createInfoElementForTemplateSet("originalExporterIPv4Address", ipfixregistry.IANAEnterpriseID)
+		if err != nil {
+			return 0, err
+		}
+		elements = append(elements, ie)
+		ie, err = e.createInfoElementForTemplateSet("originalExporterIPv6Address", ipfixregistry.IANAEnterpriseID)
+		if err != nil {
+			return 0, err
+		}
+		elements = append(elements, ie)
 	}
 	e.set.ResetSet()
 	if err := e.set.PrepareSet(ipfixentities.Template, templateID); err != nil {
