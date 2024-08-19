@@ -395,6 +395,15 @@ func (fa *flowAggregator) proxyRecord(record ipfixentities.Record, obsDomainID u
 		return element.GetIPAddressValue().String()
 	}
 
+	getFlowType := func(record ipfixentities.Record) uint8 {
+		element, _, exist := record.GetInfoElementWithValue("flowType")
+		if !exist {
+			klog.ErrorS(nil, "Missing flowType")
+			return 0
+		}
+		return element.GetUnsigned8Value()
+	}
+
 	sourceIPv4Address := getAddress(record, "sourceIPv4Address")
 	sourceIPv6Address := getAddress(record, "sourceIPv6Address")
 	destinationIPv4Address := getAddress(record, "destinationIPv4Address")
@@ -418,7 +427,10 @@ func (fa *flowAggregator) proxyRecord(record ipfixentities.Record, obsDomainID u
 	if err != nil {
 		return fmt.Errorf("cannot find record start time: %w", err)
 	}
-	fa.fillK8sMetadata(sourceAddress, destinationAddress, record, startTime)
+	if getFlowType(record) == ipfixregistry.FlowTypeInterNode {
+		// This is the only case where K8s metadata could be missing
+		fa.fillK8sMetadata(sourceAddress, destinationAddress, record, startTime)
+	}
 	fa.fillPodLabels(sourceAddress, destinationAddress, record, startTime)
 	if err := fa.addOriginalObservationDomainID(record, obsDomainID); err != nil {
 		klog.ErrorS(err, "Failed to add originalObservationDomainId")

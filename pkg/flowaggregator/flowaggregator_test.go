@@ -270,6 +270,9 @@ func TestFlowAggregator_proxyRecord(t *testing.T) {
 
 			startTime := time.Now().Truncate(time.Second)
 
+			flowTypeIE := ipfixentities.NewUnsigned8InfoElement(ipfixentities.NewInfoElement("flowType", 0, ipfixentities.Unsigned8, ipfixregistry.AntreaEnterpriseID, 0), ipfixregistry.FlowTypeInterNode)
+			mockRecord.EXPECT().GetInfoElementWithValue("flowType").Return(flowTypeIE, 0, true)
+
 			var sourceAddress, destinationAddress string
 			var sourceIPv4Address, sourceIPv6Address, destinationIPv4Address, destinationIPv6Address string
 			if tc.isIPv6 {
