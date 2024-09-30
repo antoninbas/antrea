@@ -56,6 +56,9 @@ type FlowAggregatorConfig struct {
 	RecordContents RecordContentsConfig `yaml:"recordContents,omitempty"`
 	// APIServer contains APIServer related configuration options.
 	APIServer APIServerConfig `yaml:"apiServer,omitempty"`
+	// Ignore records where the source or destination is in the FlowAggregatpr Namespace.
+	// At the moment, it is only supported in Proxy mode.
+	IgnoreFlowAggregatorNamespace bool `yaml:"ignoreFlowAggregatorNamespace,omitempty"`
 	// FlowCollector contains external IPFIX or JSON collector related configuration options.
 	FlowCollector FlowCollectorConfig `yaml:"flowCollector,omitempty"`
 	// ClickHouse contains ClickHouse related configuration options.

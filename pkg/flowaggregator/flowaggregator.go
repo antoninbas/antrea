@@ -38,6 +38,7 @@ import (
 	"antrea.io/antrea/pkg/flowaggregator/options"
 	"antrea.io/antrea/pkg/flowaggregator/querier"
 	"antrea.io/antrea/pkg/ipfix"
+	"antrea.io/antrea/pkg/util/env"
 	"antrea.io/antrea/pkg/util/podstore"
 )
 
@@ -123,6 +124,9 @@ type flowAggregator struct {
 	s3Exporter                  exporter.Interface
 	logExporter                 exporter.Interface
 	logTickerDuration           time.Duration
+
+	ignoreFlowAggregatorNamespace bool
+	flowAggregatorNamespace       string
 }
 
 func NewFlowAggregator(
@@ -173,6 +177,9 @@ func NewFlowAggregator(
 		configData:                  data,
 		APIServer:                   opt.Config.APIServer,
 		logTickerDuration:           time.Minute,
+
+		ignoreFlowAggregatorNamespace: opt.Config.IgnoreFlowAggregatorNamespace,
+		flowAggregatorNamespace:       env.GetPodNamespace(),
 	}
 	err = fa.InitCollectingProcess()
 	if err != nil {
@@ -458,6 +465,16 @@ func (fa *flowAggregator) flowExportLoopProxy(stopCh <-chan struct{}) {
 
 		records := set.GetRecords()
 		for _, record := range records {
+			if fa.ignoreFlowAggregatorNamespace {
+				if sourcePodNamespace, _, exist := record.GetInfoElementWithValue("sourcePodNamespace"); exist && sourcePodNamespace.GetStringValue() == fa.flowAggregatorNamespace {
+					klog.V(5).InfoS("Ignoring record with source in FlowAggregator Namespace")
+					continue
+				}
+				if destinationPodNamespace, _, exist := record.GetInfoElementWithValue("destinationPodNamespace"); exist && destinationPodNamespace.GetStringValue() == fa.flowAggregatorNamespace {
+					klog.V(5).InfoS("Ignoring record with destination in FlowAggregator Namespace")
+					continue
+				}
+			}
 			if err := fa.proxyRecord(record, msg.GetObsDomainID(), msg.GetExportAddress()); err != nil {
 				klog.ErrorS(err, "Failed to proxy record")
 			}
@@ -895,6 +912,9 @@ func (fa *flowAggregator) updateFlowAggregator(opt *options.Options) {
 		klog.InfoS("Updated recordContents.podLabels configuration", "value", fa.includePodLabels)
 	}
 	var unsupportedUpdates []string
+	if opt.AggregatorMode != fa.aggregatorMode {
+		unsupportedUpdates = append(unsupportedUpdates, "aggregatorMode")
+	}
 	if opt.Config.APIServer != fa.APIServer {
 		unsupportedUpdates = append(unsupportedUpdates, "apiServer")
 	}
@@ -909,6 +929,9 @@ func (fa *flowAggregator) updateFlowAggregator(opt *options.Options) {
 	}
 	if opt.Config.FlowAggregatorAddress != fa.flowAggregatorAddress {
 		unsupportedUpdates = append(unsupportedUpdates, "flowAggregatorAddress")
+	}
+	if opt.Config.IgnoreFlowAggregatorNamespace != fa.ignoreFlowAggregatorNamespace {
+		unsupportedUpdates = append(unsupportedUpdates, "ignoreFlowAggregatorNamespace")
 	}
 	if len(unsupportedUpdates) > 0 {
 		klog.ErrorS(nil, "Ignoring unsupported configuration updates, please restart FlowAggregator", "keys", unsupportedUpdates)

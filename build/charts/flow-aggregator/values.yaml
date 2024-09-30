@@ -34,6 +34,9 @@ apiServer:
   tlsCipherSuites: ""
   # -- TLS min version from: VersionTLS10, VersionTLS11, VersionTLS12, VersionTLS13.
   tlsMinVersion: ""
+# -- Ignore records where the source or destination is in the FlowAggregatpr Namespace.
+# At the moment, it is only supported in Proxy mode.
+ignoreFlowAggregatorNamespace: false
 # flowCollector contains external IPFIX or JSON collector related configuration options.
 flowCollector:
   # -- Determine whether to enable exporting flow records to external flow collector.
