@@ -31,6 +31,7 @@ import (
 const (
 	deleteQueueName = "podStorePodsToDelete"
 	podIPIndex      = "PodIP"
+	podNameIndex    = "PodName"
 	delayTime       = time.Minute * 5
 )
 
@@ -53,6 +54,7 @@ type podTimestamps struct {
 // Interface is a podStore interface to create local podStore for Flow Exporter and Flow Aggregator.
 type Interface interface {
 	GetPodByIPAndTime(ip string, startTime time.Time) (*corev1.Pod, bool)
+	GetPodByNameAndTime(name string, startTime time.Time) (*corev1.Pod, bool)
 	Run(stopCh <-chan struct{})
 }
 
@@ -60,7 +62,7 @@ type Interface interface {
 // which is useful when writing robust unit tests.
 func NewPodStoreWithClock(podInformer cache.SharedIndexInformer, clock clock.WithTicker) *PodStore {
 	s := &PodStore{
-		pods: cache.NewIndexer(podKeyFunc, cache.Indexers{podIPIndex: podIPIndexFunc}),
+		pods: cache.NewIndexer(podKeyFunc, cache.Indexers{podIPIndex: podIPIndexFunc, podNameIndex: podNameIndexFunc}),
 		podsToDelete: workqueue.NewTypedDelayingQueueWithConfig(workqueue.TypedDelayingQueueConfig[types.UID]{
 			Name:  deleteQueueName,
 			Clock: clock,
@@ -182,6 +184,33 @@ func (s *PodStore) GetPodByIPAndTime(ip string, time time.Time) (*corev1.Pod, bo
 	return nil, false
 }
 
+func (s *PodStore) GetPodByNameAndTime(name string, time time.Time) (*corev1.Pod, bool) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	pods, _ := s.pods.ByIndex(podNameIndex, name)
+	if len(pods) == 0 {
+		return nil, false
+	} else if len(pods) == 1 {
+		pod := pods[0].(*corev1.Pod)
+		// In case the clocks may be skewed between different Nodes in the cluster, we directly return the Pod if there is only
+		// one Pod in the indexer. Otherwise, we check the timestamp for Pods in the indexer.
+		klog.V(4).InfoS("Matched Pod name to Pod from indexer", "name", name, "Pod", klog.KObj(pod))
+		return pod, true
+	}
+	for _, pod := range pods {
+		pod := pod.(*corev1.Pod)
+		timestamp, ok := s.timestampMap[pod.UID]
+		if !ok {
+			continue
+		}
+		if timestamp.CreationTimestamp.Before(time) && (timestamp.DeletionTimestamp == nil || time.Before(*timestamp.DeletionTimestamp)) {
+			klog.V(4).InfoS("Matched Pod name and time to Pod from indexer", "name", name, "time", time, "Pod", klog.KObj(pod))
+			return pod, true
+		}
+	}
+	return nil, false
+}
+
 func (s *PodStore) Run(stopCh <-chan struct{}) {
 	defer s.podsToDelete.ShutDown()
 	go wait.Until(s.worker, time.Second, stopCh)
@@ -239,4 +268,12 @@ func podIPIndexFunc(obj interface{}) ([]string, error) {
 		return indexes, nil
 	}
 	return nil, nil
+}
+
+func podNameIndexFunc(obj interface{}) ([]string, error) {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return nil, fmt.Errorf("obj is not Pod: %+v", obj)
+	}
+	return []string{pod.Name}, nil
 }

@@ -58,10 +58,12 @@ func run(configFile string) error {
 	informerFactory := informers.NewSharedInformerFactory(k8sClient, informerDefaultResync)
 	podInformer := informerFactory.Core().V1().Pods()
 	podStore := podstore.NewPodStore(podInformer.Informer())
+	nodeInformer := informerFactory.Core().V1().Nodes()
 
 	flowAggregator, err := aggregator.NewFlowAggregator(
 		k8sClient,
 		podStore,
+		nodeInformer,
 		configFile,
 	)
 

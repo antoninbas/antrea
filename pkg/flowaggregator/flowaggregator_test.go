@@ -34,6 +34,7 @@ import (
 	"gopkg.in/yaml.v2"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/klog/v2"
@@ -676,6 +677,10 @@ func TestFlowAggregator_Run(t *testing.T) {
 		return mockLogExporter, nil
 	}
 
+	client := fake.NewSimpleClientset()
+	informerFactory := informers.NewSharedInformerFactory(client, 0)
+	nodeInformer := informerFactory.Core().V1().Nodes()
+
 	// create dummy watcher: we will not add any files or directory to it.
 	configWatcher, err := fsnotify.NewWatcher()
 	require.NoError(t, err)
@@ -703,7 +708,13 @@ func TestFlowAggregator_Run(t *testing.T) {
 		configWatcher:           configWatcher,
 		updateCh:                updateCh,
 		podStore:                mockPodStore,
+		nodeLister:              nodeInformer.Lister(),
+		nodeListerSynced:        nodeInformer.Informer().HasSynced,
 	}
+
+	stopCh := make(chan struct{})
+	informerFactory.Start(stopCh)
+	informerFactory.WaitForCacheSync(stopCh)
 
 	mockCollectingProcess.EXPECT().Start()
 	mockCollectingProcess.EXPECT().Stop()
@@ -729,7 +740,6 @@ func TestFlowAggregator_Run(t *testing.T) {
 	mockS3Exporter.EXPECT().UpdateOptions(gomock.Any()).AnyTimes()
 	mockLogExporter.EXPECT().UpdateOptions(gomock.Any()).AnyTimes()
 
-	stopCh := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {

@@ -70,6 +70,21 @@ func (mr *MockInterfaceMockRecorder) GetPodByIPAndTime(arg0, arg1 any) *gomock.C
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPodByIPAndTime", reflect.TypeOf((*MockInterface)(nil).GetPodByIPAndTime), arg0, arg1)
 }
 
+// GetPodByNameAndTime mocks base method.
+func (m *MockInterface) GetPodByNameAndTime(arg0 string, arg1 time.Time) (*v1.Pod, bool) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPodByNameAndTime", arg0, arg1)
+	ret0, _ := ret[0].(*v1.Pod)
+	ret1, _ := ret[1].(bool)
+	return ret0, ret1
+}
+
+// GetPodByNameAndTime indicates an expected call of GetPodByNameAndTime.
+func (mr *MockInterfaceMockRecorder) GetPodByNameAndTime(arg0, arg1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPodByNameAndTime", reflect.TypeOf((*MockInterface)(nil).GetPodByNameAndTime), arg0, arg1)
+}
+
 // Run mocks base method.
 func (m *MockInterface) Run(arg0 <-chan struct{}) {
 	m.ctrl.T.Helper()

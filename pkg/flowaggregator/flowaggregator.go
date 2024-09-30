@@ -29,7 +29,10 @@ import (
 	ipfixentities "github.com/vmware/go-ipfix/pkg/entities"
 	ipfixintermediate "github.com/vmware/go-ipfix/pkg/intermediate"
 	ipfixregistry "github.com/vmware/go-ipfix/pkg/registry"
+	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
+	corelisters "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
 	flowaggregatorconfig "antrea.io/antrea/pkg/config/flowaggregator"
@@ -127,11 +130,16 @@ type flowAggregator struct {
 
 	ignoreFlowAggregatorNamespace bool
 	flowAggregatorNamespace       string
+
+	replaceNamesWithUIDs bool
+	nodeLister           corelisters.NodeLister
+	nodeListerSynced     cache.InformerSynced
 }
 
 func NewFlowAggregator(
 	k8sClient kubernetes.Interface,
 	podStore podstore.Interface,
+	nodeInformer coreinformers.NodeInformer,
 	configFile string,
 ) (*flowAggregator, error) {
 	if len(configFile) == 0 {
@@ -180,6 +188,10 @@ func NewFlowAggregator(
 
 		ignoreFlowAggregatorNamespace: opt.Config.IgnoreFlowAggregatorNamespace,
 		flowAggregatorNamespace:       env.GetPodNamespace(),
+
+		replaceNamesWithUIDs: opt.Config.ReplaceNamesWithUIDs,
+		nodeLister:           nodeInformer.Lister(),
+		nodeListerSynced:     nodeInformer.Informer().HasSynced,
 	}
 	err = fa.InitCollectingProcess()
 	if err != nil {
@@ -292,6 +304,11 @@ func (fa *flowAggregator) InitAggregationProcess() error {
 
 func (fa *flowAggregator) Run(stopCh <-chan struct{}) {
 	var wg, ipfixProcessesWg sync.WaitGroup
+
+	// In theory this is only needed when fa.replaceNamesWithUIDs is true.
+	if !cache.WaitForCacheSync(stopCh, fa.nodeListerSynced) {
+		return
+	}
 
 	ipfixProcessesWg.Add(1)
 	go func() {
@@ -439,6 +456,9 @@ func (fa *flowAggregator) proxyRecord(record ipfixentities.Record, obsDomainID u
 		fa.fillK8sMetadata(sourceAddress, destinationAddress, record, startTime)
 	}
 	fa.fillPodLabels(sourceAddress, destinationAddress, record, startTime)
+	if fa.replaceNamesWithUIDs {
+		fa.fillK8sUIDs(record, startTime)
+	}
 	if err := fa.addOriginalObservationDomainID(record, obsDomainID); err != nil {
 		klog.ErrorS(err, "Failed to add originalObservationDomainId")
 	}
@@ -450,6 +470,49 @@ func (fa *flowAggregator) proxyRecord(record ipfixentities.Record, obsDomainID u
 		klog.ErrorS(err, "Failed to add originalExporterIPv6Address")
 	}
 	return fa.sendRecord(record, isIPv6)
+}
+
+func (fa *flowAggregator) fillK8sUIDs(record ipfixentities.Record, startTime time.Time) {
+	if sourcePodName, _, exist := record.GetInfoElementWithValue("sourcePodName"); exist {
+		name := sourcePodName.GetStringValue()
+		if name != "" {
+			pod, exist := fa.podStore.GetPodByNameAndTime(name, startTime)
+			if exist {
+				sourcePodName.SetStringValue(string(pod.UID))
+			}
+		}
+	}
+	if destinationPodName, _, exist := record.GetInfoElementWithValue("destinationPodName"); exist {
+		name := destinationPodName.GetStringValue()
+		if name != "" {
+			pod, exist := fa.podStore.GetPodByNameAndTime(name, startTime)
+			if exist {
+				destinationPodName.SetStringValue(string(pod.UID))
+			}
+		}
+	}
+	if sourceNodeName, _, exist := record.GetInfoElementWithValue("sourceNodeName"); exist {
+		name := sourceNodeName.GetStringValue()
+		if name != "" {
+			node, err := fa.nodeLister.Get(name)
+			if err != nil {
+				klog.ErrorS(nil, "Cannot find Node information", "name", name)
+			} else {
+				sourceNodeName.SetStringValue(string(node.UID))
+			}
+		}
+	}
+	if destinationNodeName, _, exist := record.GetInfoElementWithValue("destinationNodeName"); exist {
+		name := destinationNodeName.GetStringValue()
+		if name != "" {
+			node, err := fa.nodeLister.Get(name)
+			if err != nil {
+				klog.ErrorS(nil, "Cannot find Node information", "name", name)
+			} else {
+				destinationNodeName.SetStringValue(string(node.UID))
+			}
+		}
+	}
 }
 
 func (fa *flowAggregator) flowExportLoopProxy(stopCh <-chan struct{}) {
@@ -932,6 +995,9 @@ func (fa *flowAggregator) updateFlowAggregator(opt *options.Options) {
 	}
 	if opt.Config.IgnoreFlowAggregatorNamespace != fa.ignoreFlowAggregatorNamespace {
 		unsupportedUpdates = append(unsupportedUpdates, "ignoreFlowAggregatorNamespace")
+	}
+	if opt.Config.ReplaceNamesWithUIDs != fa.replaceNamesWithUIDs {
+		unsupportedUpdates = append(unsupportedUpdates, "replaceNamesWithUIDs")
 	}
 	if len(unsupportedUpdates) > 0 {
 		klog.ErrorS(nil, "Ignoring unsupported configuration updates, please restart FlowAggregator", "keys", unsupportedUpdates)

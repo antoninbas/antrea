@@ -10,7 +10,7 @@ rules:
     resourceNames: ["flow-aggregator-ca"]
     verbs: ["get", "update"]
   - apiGroups: [""]
-    resources: ["pods"]
+    resources: ["pods", "nodes"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["configmaps"]
