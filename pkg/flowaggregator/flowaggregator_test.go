@@ -202,6 +202,54 @@ func TestFlowAggregator_sendAggregatedRecord(t *testing.T) {
 	}
 }
 
+func TestFlowAggregator_sendAggregatedRecord_ignoreFlowAggregatorNamespace(t *testing.T) {
+	const faNamespace = "flow-aggregator"
+
+	testCases := []struct {
+		name                 string
+		sourceNamespace      string
+		destinationNamespace string
+	}{
+		{
+			name:                 "sourceNamespace",
+			sourceNamespace:      faNamespace,
+			destinationNamespace: "default",
+		},
+		{
+			name:                 "destinationNamespace",
+			sourceNamespace:      "default",
+			destinationNamespace: faNamespace,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			mockIPFIXExporter := exportertesting.NewMockInterface(ctrl)
+			mockRecord := ipfixentitiestesting.NewMockRecord(ctrl)
+			fa := &flowAggregator{
+				clusterUUID:                   uuid.New(),
+				ipfixExporter:                 mockIPFIXExporter,
+				ignoreFlowAggregatorNamespace: true,
+				flowAggregatorNamespace:       faNamespace,
+			}
+			flowRecord := &ipfixintermediate.AggregationFlowRecord{
+				Record: mockRecord,
+			}
+			// Emphasize that we do not expect any call to AddRecord, as the record should be ignored.
+			mockIPFIXExporter.EXPECT().AddRecord(gomock.Any(), gomock.Any()).Times(0)
+
+			sourcePodNamespaceIE := ipfixentities.NewStringInfoElement(ipfixentities.NewInfoElement("sourcePodNamespace", 0, 0, ipfixregistry.AntreaEnterpriseID, 0), tc.sourceNamespace)
+			mockRecord.EXPECT().GetInfoElementWithValue("sourcePodNamespace").Return(sourcePodNamespaceIE, 0, true).AnyTimes()
+			destinationPodNamespaceIE := ipfixentities.NewStringInfoElement(ipfixentities.NewInfoElement("destinationPodNamespace", 0, 0, ipfixregistry.AntreaEnterpriseID, 0), tc.destinationNamespace)
+			mockRecord.EXPECT().GetInfoElementWithValue("destinationPodNamespace").Return(destinationPodNamespaceIE, 0, true).AnyTimes()
+
+			// FlowKey doesn't matter for this test, so we use an empty object.
+			require.NoError(t, fa.sendAggregatedRecord(ipfixintermediate.FlowKey{}, flowRecord))
+		})
+	}
+}
+
 func TestFlowAggregator_proxyRecord(t *testing.T) {
 	podA := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -359,6 +407,67 @@ func TestFlowAggregator_proxyRecord(t *testing.T) {
 
 			err := fa.proxyRecord(mockRecord, obsDomainID, exporterAddress)
 			assert.NoError(t, err, "Error when proxying flow record")
+		})
+	}
+}
+
+func TestFlowAggregator_proxyRecord_ignoreFlowAggregatorNamespace(t *testing.T) {
+	const faNamespace = "flow-aggregator"
+
+	testCases := []struct {
+		name                 string
+		sourceNamespace      string
+		destinationNamespace string
+	}{
+		{
+			name:                 "sourceNamespace",
+			sourceNamespace:      faNamespace,
+			destinationNamespace: "default",
+		},
+		{
+			name:                 "destinationNamespace",
+			sourceNamespace:      "default",
+			destinationNamespace: faNamespace,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			mockIPFIXExporter := exportertesting.NewMockInterface(ctrl)
+			mockRecord := ipfixentitiestesting.NewMockRecord(ctrl)
+			fa := &flowAggregator{
+				clusterUUID:                   uuid.New(),
+				ipfixExporter:                 mockIPFIXExporter,
+				ignoreFlowAggregatorNamespace: true,
+				flowAggregatorNamespace:       faNamespace,
+			}
+			// Emphasize that we do not expect any call to AddRecord, as the record should be ignored.
+			mockIPFIXExporter.EXPECT().AddRecord(gomock.Any(), gomock.Any()).Times(0)
+
+			startTime := time.Now().Truncate(time.Second)
+			flowStartSecondsIE := ipfixentities.NewDateTimeSecondsInfoElement(ipfixentities.NewInfoElement("flowStartSeconds", 150, 14, ipfixregistry.IANAEnterpriseID, 4), uint32(startTime.Unix()))
+			mockRecord.EXPECT().GetInfoElementWithValue("flowStartSeconds").Return(flowStartSecondsIE, 0, true)
+
+			// Use an intra-Node flow to reduce the number of expectations we have to set.
+			flowTypeIE := ipfixentities.NewUnsigned8InfoElement(ipfixentities.NewInfoElement("flowType", 0, ipfixentities.Unsigned8, ipfixregistry.AntreaEnterpriseID, 0), ipfixregistry.FlowTypeIntraNode)
+			mockRecord.EXPECT().GetInfoElementWithValue("flowType").Return(flowTypeIE, 0, true)
+
+			sourceIPv4AddressIE := ipfixentities.NewIPAddressInfoElement(ipfixentities.NewInfoElement("sourceIPv4Address", 0, ipfixentities.Ipv4Address, ipfixregistry.IANAEnterpriseID, 0), net.ParseIP("10.0.0.1"))
+			mockRecord.EXPECT().GetInfoElementWithValue("sourceIPv4Address").Return(sourceIPv4AddressIE, 0, true)
+			destinationIPv4AddressIE := ipfixentities.NewIPAddressInfoElement(ipfixentities.NewInfoElement("destinationIPv4Address", 0, ipfixentities.Ipv4Address, ipfixregistry.IANAEnterpriseID, 0), net.ParseIP("10.0.0.2"))
+			mockRecord.EXPECT().GetInfoElementWithValue("destinationIPv4Address").Return(destinationIPv4AddressIE, 0, true)
+
+			mockRecord.EXPECT().GetInfoElementWithValue("sourceIPv6Address").Return(nil, 0, false)
+			mockRecord.EXPECT().GetInfoElementWithValue("destinationIPv6Address").Return(nil, 0, false)
+
+			sourcePodNamespaceIE := ipfixentities.NewStringInfoElement(ipfixentities.NewInfoElement("sourcePodNamespace", 0, 0, ipfixregistry.AntreaEnterpriseID, 0), tc.sourceNamespace)
+			mockRecord.EXPECT().GetInfoElementWithValue("sourcePodNamespace").Return(sourcePodNamespaceIE, 0, true).AnyTimes()
+			destinationPodNamespaceIE := ipfixentities.NewStringInfoElement(ipfixentities.NewInfoElement("destinationPodNamespace", 0, 0, ipfixregistry.AntreaEnterpriseID, 0), tc.destinationNamespace)
+			mockRecord.EXPECT().GetInfoElementWithValue("destinationPodNamespace").Return(destinationPodNamespaceIE, 0, true).AnyTimes()
+
+			// FlowKey doesn't matter for this test, so we use an empty object.
+			require.NoError(t, fa.proxyRecord(mockRecord, 0, ""))
 		})
 	}
 }

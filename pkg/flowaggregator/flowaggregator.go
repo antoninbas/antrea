@@ -39,6 +39,7 @@ import (
 	"antrea.io/antrea/pkg/flowaggregator/options"
 	"antrea.io/antrea/pkg/flowaggregator/querier"
 	"antrea.io/antrea/pkg/ipfix"
+	"antrea.io/antrea/pkg/util/env"
 	"antrea.io/antrea/pkg/util/podstore"
 )
 
@@ -102,31 +103,33 @@ var (
 )
 
 type flowAggregator struct {
-	aggregatorMode              flowaggregatorconfig.AggregatorMode
-	clusterUUID                 uuid.UUID
-	aggregatorTransportProtocol flowaggregatorconfig.AggregatorTransportProtocol
-	collectingProcess           ipfix.IPFIXCollectingProcess
-	preprocessor                *preprocessor
-	aggregationProcess          ipfix.IPFIXAggregationProcess
-	activeFlowRecordTimeout     time.Duration
-	inactiveFlowRecordTimeout   time.Duration
-	registry                    ipfix.IPFIXRegistry
-	flowAggregatorAddress       string
-	includePodLabels            bool
-	k8sClient                   kubernetes.Interface
-	podStore                    podstore.Interface
-	numRecordsExported          int64
-	updateCh                    chan *options.Options
-	configFile                  string
-	configWatcher               *fsnotify.Watcher
-	configData                  []byte
-	APIServer                   flowaggregatorconfig.APIServerConfig
-	ipfixExporter               exporter.Interface
-	clickHouseExporter          exporter.Interface
-	s3Exporter                  exporter.Interface
-	logExporter                 exporter.Interface
-	logTickerDuration           time.Duration
-	preprocessorOutCh           chan *ipfixentities.Message
+	aggregatorMode                flowaggregatorconfig.AggregatorMode
+	clusterUUID                   uuid.UUID
+	aggregatorTransportProtocol   flowaggregatorconfig.AggregatorTransportProtocol
+	collectingProcess             ipfix.IPFIXCollectingProcess
+	preprocessor                  *preprocessor
+	aggregationProcess            ipfix.IPFIXAggregationProcess
+	activeFlowRecordTimeout       time.Duration
+	inactiveFlowRecordTimeout     time.Duration
+	registry                      ipfix.IPFIXRegistry
+	flowAggregatorAddress         string
+	includePodLabels              bool
+	k8sClient                     kubernetes.Interface
+	podStore                      podstore.Interface
+	numRecordsExported            int64
+	updateCh                      chan *options.Options
+	configFile                    string
+	configWatcher                 *fsnotify.Watcher
+	configData                    []byte
+	APIServer                     flowaggregatorconfig.APIServerConfig
+	ipfixExporter                 exporter.Interface
+	clickHouseExporter            exporter.Interface
+	s3Exporter                    exporter.Interface
+	logExporter                   exporter.Interface
+	logTickerDuration             time.Duration
+	preprocessorOutCh             chan *ipfixentities.Message
+	ignoreFlowAggregatorNamespace bool
+	flowAggregatorNamespace       string
 }
 
 func NewFlowAggregator(
@@ -180,7 +183,9 @@ func NewFlowAggregator(
 		APIServer:                   opt.Config.APIServer,
 		logTickerDuration:           time.Minute,
 		// We support buffering a small amount of messages.
-		preprocessorOutCh: make(chan *ipfixentities.Message, 16),
+		preprocessorOutCh:             make(chan *ipfixentities.Message, 16),
+		ignoreFlowAggregatorNamespace: opt.Config.IgnoreFlowAggregatorNamespace,
+		flowAggregatorNamespace:       env.GetPodNamespace(),
 	}
 	if err := fa.InitCollectingProcess(); err != nil {
 		return nil, fmt.Errorf("error when creating collecting process: %w", err)
@@ -509,6 +514,20 @@ func (fa *flowAggregator) proxyRecord(record ipfixentities.Record, obsDomainID u
 		// This is the only case where K8s metadata could be missing
 		fa.fillK8sMetadata(sourceAddress, destinationAddress, record, startTime)
 	}
+	if fa.ignoreFlowAggregatorNamespace {
+		if destinationPodNamespace, _, exist := record.GetInfoElementWithValue("destinationPodNamespace"); exist && destinationPodNamespace.GetStringValue() == fa.flowAggregatorNamespace {
+			if klog.V(7).Enabled() {
+				klog.InfoS("Ignoring record with destination in FlowAggregator Namespace")
+			}
+			return nil
+		}
+		if sourcePodNamespace, _, exist := record.GetInfoElementWithValue("sourcePodNamespace"); exist && sourcePodNamespace.GetStringValue() == fa.flowAggregatorNamespace {
+			if klog.V(7).Enabled() {
+				klog.InfoS("Ignoring record with source in FlowAggregator Namespace")
+			}
+			return nil
+		}
+	}
 	fa.fillPodLabels(sourceAddress, destinationAddress, record, startTime)
 	if err := fa.fillClusterID(record); err != nil {
 		klog.ErrorS(err, "Failed to add clusterId")
@@ -642,6 +661,21 @@ func (fa *flowAggregator) sendRecord(record ipfixentities.Record, isRecordIPv6 b
 }
 
 func (fa *flowAggregator) sendAggregatedRecord(key ipfixintermediate.FlowKey, record *ipfixintermediate.AggregationFlowRecord) error {
+	// In Aggregation mode, this check has to be performed post-aggregation.
+	if fa.ignoreFlowAggregatorNamespace {
+		if destinationPodNamespace, _, exist := record.Record.GetInfoElementWithValue("destinationPodNamespace"); exist && destinationPodNamespace.GetStringValue() == fa.flowAggregatorNamespace {
+			if klog.V(7).Enabled() {
+				klog.InfoS("Ignoring record with destination in FlowAggregator Namespace")
+			}
+			return nil
+		}
+		if sourcePodNamespace, _, exist := record.Record.GetInfoElementWithValue("sourcePodNamespace"); exist && sourcePodNamespace.GetStringValue() == fa.flowAggregatorNamespace {
+			if klog.V(7).Enabled() {
+				klog.InfoS("Ignoring record with source in FlowAggregator Namespace")
+			}
+			return nil
+		}
+	}
 	isRecordIPv4 := fa.aggregationProcess.IsAggregatedRecordIPv4(*record)
 	startTime, err := fa.getRecordStartTime(record.Record)
 	if err != nil {
@@ -996,7 +1030,14 @@ func (fa *flowAggregator) updateFlowAggregator(opt *options.Options) {
 		fa.includePodLabels = opt.Config.RecordContents.PodLabels
 		klog.InfoS("Updated recordContents.podLabels configuration", "value", fa.includePodLabels)
 	}
+	if opt.Config.IgnoreFlowAggregatorNamespace != fa.ignoreFlowAggregatorNamespace {
+		fa.ignoreFlowAggregatorNamespace = opt.Config.IgnoreFlowAggregatorNamespace
+		klog.InfoS("Updated ignoreFlowAggregatorNamespace", "value", fa.ignoreFlowAggregatorNamespace)
+	}
 	var unsupportedUpdates []string
+	if opt.AggregatorMode != fa.aggregatorMode {
+		unsupportedUpdates = append(unsupportedUpdates, "aggregatorMode")
+	}
 	if opt.Config.APIServer != fa.APIServer {
 		unsupportedUpdates = append(unsupportedUpdates, "apiServer")
 	}
