@@ -18,15 +18,29 @@ jobs:
     - name: Build Antrea Docker image
       run: |
         ./hack/build-antrea-linux-all.sh --pull
+    - name: Install Trivy
+      uses: aquasecurity/setup-trivy@v0.2.1
+    - name: Download Trivy DB
+      # Try downloading the vulnerability DB up to 5 times, to account for TOOMANYREQUESTS errors.
+      run: |
+        for i in {1..5}; do trivy image --download-db-only && break || sleep 1; done
     - name: Run Trivy vulnerability scanner on the antrea-agent Docker image
       uses: aquasecurity/trivy-action@0.28.0
       with:
         scan-type: 'image'
         image-ref: 'antrea/antrea-agent-ubuntu:latest'
         trivy-config: '.trivy.yml'
+        skip-setup-trivy: true
+      env:
+        TRIVY_SKIP_DB_UPDATE: true
+        TRIVY_SKIP_JAVA_DB_UPDATE: true
     - name: Run Trivy vulnerability scanner on the antrea-controller Docker image
       uses: aquasecurity/trivy-action@0.28.0
       with:
         scan-type: 'image'
         image-ref: 'antrea/antrea-controller-ubuntu:latest'
         trivy-config: '.trivy.yml'
+        skip-setup-trivy: true
+      env:
+        TRIVY_SKIP_DB_UPDATE: true
+        TRIVY_SKIP_JAVA_DB_UPDATE: true
