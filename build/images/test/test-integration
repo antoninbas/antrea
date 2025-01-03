@@ -23,4 +23,5 @@ trap "chown -R $1:$2 /tmp/gopath /tmp/gocache" EXIT
 # run. This is why we explicitly add the Antrea source directory to the list of
 # "safe" directories.
 git config --global --add safe.directory $(pwd)
+ip addr
 make test-integration

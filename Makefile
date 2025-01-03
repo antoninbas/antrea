@@ -303,7 +303,7 @@ tidy:
 	@echo
 	@echo "==> Running integration tests <=="
 	@echo "SOME TESTS WILL FAIL IF NOT RUN AS ROOT!"
-	$(GO) test $(TEST_ARGS) -v -coverpkg=antrea.io/antrea/pkg/... -coverprofile=.coverage/coverage-integration.txt -covermode=atomic antrea.io/antrea/test/integration/...
+	$(GO) test $(TEST_ARGS) -count=100 -v -coverpkg=antrea.io/antrea/pkg/... -coverprofile=.coverage/coverage-integration.txt -covermode=atomic antrea.io/antrea/test/integration/agent/...
 
 test-tidy:
 	@echo
