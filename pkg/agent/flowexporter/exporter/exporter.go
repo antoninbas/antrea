@@ -26,12 +26,13 @@ import (
 	ipfixregistry "github.com/vmware/go-ipfix/pkg/registry"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
 	"antrea.io/antrea/pkg/agent/config"
-	"antrea.io/antrea/pkg/agent/controller/noderoute"
 	"antrea.io/antrea/pkg/agent/flowexporter"
 	"antrea.io/antrea/pkg/agent/flowexporter/connections"
+	"antrea.io/antrea/pkg/agent/flowexporter/k8s"
 	"antrea.io/antrea/pkg/agent/flowexporter/priorityqueue"
 	"antrea.io/antrea/pkg/agent/metrics"
 	"antrea.io/antrea/pkg/agent/openflow"
@@ -126,7 +127,7 @@ type FlowExporter struct {
 	v6Enabled              bool
 	exporterInput          exporter.ExporterInput
 	k8sClient              kubernetes.Interface
-	nodeRouteController    *noderoute.Controller
+	nodeStore              *k8s.NodeStore
 	isNetworkPolicyOnly    bool
 	nodeName               string
 	conntrackPriorityQueue *priorityqueue.ExpirePriorityQueue
@@ -159,7 +160,7 @@ func prepareExporterInputArgs(collectorProto, nodeName string) exporter.Exporter
 	return expInput
 }
 
-func NewFlowExporter(podStore podstore.Interface, proxier proxy.Proxier, k8sClient kubernetes.Interface, nodeRouteController *noderoute.Controller,
+func NewFlowExporter(podStore podstore.Interface, proxier proxy.Proxier, k8sClient kubernetes.Interface, nodeInformer cache.SharedIndexInformer,
 	trafficEncapMode config.TrafficEncapModeType, nodeConfig *config.NodeConfig, v4Enabled, v6Enabled bool, serviceCIDRNet, serviceCIDRNetv6 *net.IPNet,
 	ovsDatapathType ovsconfig.OVSDatapathType, proxyEnabled bool, npQuerier querier.AgentNetworkPolicyInfoQuerier, o *flowexporter.FlowExporterOptions,
 	egressQuerier querier.EgressQuerier, podL7FlowExporterAttrGetter connections.PodL7FlowExporterAttrGetter, l7FlowExporterEnabled bool) (*FlowExporter, error) {
@@ -174,7 +175,15 @@ func NewFlowExporter(podStore podstore.Interface, proxier proxy.Proxier, k8sClie
 	}
 	expInput := prepareExporterInputArgs(o.FlowCollectorProto, nodeName)
 
-	connTrackDumper := connections.InitializeConnTrackDumper(nodeConfig, serviceCIDRNet, serviceCIDRNetv6, ovsDatapathType, proxyEnabled)
+	isNetworkPolicyOnly := trafficEncapMode.IsNetworkPolicyOnly()
+
+	var nodeStore *k8s.NodeStore
+	// In policyOnly mode, there may not be NodeIPAM, and we don't need to collect PodCIDRs.
+	if !isNetworkPolicyOnly {
+		nodeStore = k8s.NewNodeStore(nodeInformer, nodeConfig)
+	}
+
+	connTrackDumper := connections.InitializeConnTrackDumper(nodeConfig, nodeStore, serviceCIDRNet, serviceCIDRNetv6, ovsDatapathType, proxyEnabled)
 	denyConnStore := connections.NewDenyConnectionStore(podStore, proxier, o)
 	var l7Listener *connections.L7Listener
 	var eventMapGetter connections.L7EventMapGetter
@@ -183,9 +192,6 @@ func NewFlowExporter(podStore podstore.Interface, proxier proxy.Proxier, k8sClie
 		eventMapGetter = l7Listener
 	}
 	conntrackConnStore := connections.NewConntrackConnectionStore(connTrackDumper, v4Enabled, v6Enabled, npQuerier, podStore, proxier, eventMapGetter, o)
-	if nodeRouteController == nil {
-		klog.InfoS("NodeRouteController is nil, will not be able to determine flow type for connections")
-	}
 
 	return &FlowExporter{
 		collectorAddr:          o.FlowCollectorAddr,
@@ -197,7 +203,7 @@ func NewFlowExporter(podStore podstore.Interface, proxier proxy.Proxier, k8sClie
 		exporterInput:          expInput,
 		ipfixSet:               ipfixentities.NewSet(false),
 		k8sClient:              k8sClient,
-		nodeRouteController:    nodeRouteController,
+		nodeStore:              nodeStore,
 		isNetworkPolicyOnly:    trafficEncapMode.IsNetworkPolicyOnly(),
 		nodeName:               nodeName,
 		conntrackPriorityQueue: conntrackConnStore.GetPriorityQueue(),
@@ -621,12 +627,13 @@ func (exp *FlowExporter) findFlowType(conn flowexporter.Connection) uint8 {
 		return ipfixregistry.FlowTypeIntraNode
 	}
 
-	if exp.nodeRouteController == nil {
-		klog.V(4).InfoS("Can't find flowType without nodeRouteController")
+	if exp.nodeStore == nil {
+		klog.V(4).InfoS("Can't find flowType without nodeStore")
 		return 0
 	}
-	if exp.nodeRouteController.IPInPodSubnets(conn.FlowKey.SourceAddress.AsSlice()) {
-		if conn.Mark&openflow.ServiceCTMark.GetRange().ToNXRange().ToUint32Mask() == openflow.ServiceCTMark.GetValue() || exp.nodeRouteController.IPInPodSubnets(conn.FlowKey.DestinationAddress.AsSlice()) {
+
+	if exp.nodeStore.IPInPodSubnets(conn.FlowKey.SourceAddress) {
+		if conn.Mark&openflow.ServiceCTMark.GetRange().ToNXRange().ToUint32Mask() == openflow.ServiceCTMark.GetValue() || exp.nodeStore.IPInPodSubnets(conn.FlowKey.DestinationAddress) {
 			if conn.SourcePodName == "" || conn.DestinationPodName == "" {
 				return ipfixregistry.FlowTypeInterNode
 			}

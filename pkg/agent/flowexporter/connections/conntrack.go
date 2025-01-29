@@ -22,11 +22,12 @@ import (
 
 	"antrea.io/antrea/pkg/agent/config"
 	"antrea.io/antrea/pkg/agent/flowexporter"
+	"antrea.io/antrea/pkg/agent/flowexporter/k8s"
 	"antrea.io/antrea/pkg/ovs/ovsconfig"
 )
 
 // InitializeConnTrackDumper initializes the ConnTrackDumper interface for different OS and datapath types.
-func InitializeConnTrackDumper(nodeConfig *config.NodeConfig, serviceCIDRv4 *net.IPNet, serviceCIDRv6 *net.IPNet, ovsDatapathType ovsconfig.OVSDatapathType, isAntreaProxyEnabled bool) ConnTrackDumper {
+func InitializeConnTrackDumper(nodeConfig *config.NodeConfig, nodeStore *k8s.NodeStore, serviceCIDRv4 *net.IPNet, serviceCIDRv6 *net.IPNet, ovsDatapathType ovsconfig.OVSDatapathType, isAntreaProxyEnabled bool) ConnTrackDumper {
 	var svcCIDRv4, svcCIDRv6 netip.Prefix
 	if serviceCIDRv4 != nil {
 		svcCIDRv4 = netip.MustParsePrefix(serviceCIDRv4.String())
@@ -36,15 +37,13 @@ func InitializeConnTrackDumper(nodeConfig *config.NodeConfig, serviceCIDRv4 *net
 	}
 	var connTrackDumper ConnTrackDumper
 	if ovsDatapathType == ovsconfig.OVSDatapathSystem {
-		connTrackDumper = NewConnTrackSystem(nodeConfig, svcCIDRv4, svcCIDRv6, isAntreaProxyEnabled)
+		connTrackDumper = NewConnTrackSystem(nodeConfig, nodeStore, svcCIDRv4, svcCIDRv6, isAntreaProxyEnabled)
 	}
 	return connTrackDumper
 }
 
-func filterAntreaConns(conns []*flowexporter.Connection, nodeConfig *config.NodeConfig, serviceCIDR netip.Prefix, zoneFilter uint16, isAntreaProxyEnabled bool) []*flowexporter.Connection {
+func filterAntreaConns(conns []*flowexporter.Connection, nodeStore *k8s.NodeStore, serviceCIDR netip.Prefix, zoneFilter uint16, isAntreaProxyEnabled bool) []*flowexporter.Connection {
 	filteredConns := conns[:0]
-	gwIPv4, _ := netip.AddrFromSlice(nodeConfig.GatewayConfig.IPv4)
-	gwIPv6, _ := netip.AddrFromSlice(nodeConfig.GatewayConfig.IPv6)
 	for _, conn := range conns {
 		if conn.Zone != zoneFilter {
 			continue
@@ -52,11 +51,9 @@ func filterAntreaConns(conns []*flowexporter.Connection, nodeConfig *config.Node
 		srcIP := conn.FlowKey.SourceAddress
 		dstIP := conn.FlowKey.DestinationAddress
 
-		// Consider Pod-to-Pod, Pod-To-Service and Pod-To-External flows.
-		if srcIP == gwIPv4 || dstIP == gwIPv4 {
-			continue
-		}
-		if srcIP == gwIPv6 || dstIP == gwIPv6 {
+		// We only consider Pod-to-Pod, Pod-To-Service and Pod-To-External flows.
+		// Traffic to and from gateways (e.g., for hostNetwork Pods is ignored) for now.
+		if nodeStore != nil && (nodeStore.IPIsGatewayIP(srcIP) || nodeStore.IPIsGatewayIP(dstIP)) {
 			continue
 		}
 

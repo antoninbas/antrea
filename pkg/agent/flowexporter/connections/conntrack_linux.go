@@ -27,6 +27,7 @@ import (
 
 	"antrea.io/antrea/pkg/agent/config"
 	"antrea.io/antrea/pkg/agent/flowexporter"
+	"antrea.io/antrea/pkg/agent/flowexporter/k8s"
 	"antrea.io/antrea/pkg/agent/openflow"
 	"antrea.io/antrea/pkg/agent/util/sysctl"
 )
@@ -35,7 +36,7 @@ import (
 var _ ConnTrackDumper = new(connTrackSystem)
 
 type connTrackSystem struct {
-	nodeConfig           *config.NodeConfig
+	nodeStore            *k8s.NodeStore
 	serviceCIDRv4        netip.Prefix
 	serviceCIDRv6        netip.Prefix
 	isAntreaProxyEnabled bool
@@ -44,14 +45,14 @@ type connTrackSystem struct {
 
 // TODO: detect the endianness of the system when initializing conntrack dumper to handle situations on big-endian platforms.
 // All connection labels are required to store in little endian format in conntrack dumper.
-func NewConnTrackSystem(nodeConfig *config.NodeConfig, serviceCIDRv4 netip.Prefix, serviceCIDRv6 netip.Prefix, isAntreaProxyEnabled bool) *connTrackSystem {
+func NewConnTrackSystem(nodeConfig *config.NodeConfig, nodeStore *k8s.NodeStore, serviceCIDRv4 netip.Prefix, serviceCIDRv6 netip.Prefix, isAntreaProxyEnabled bool) *connTrackSystem {
 	if err := SetupConntrackParameters(); err != nil {
 		// Do not fail, but continue after logging an error as we can still dump flows with missing information.
 		klog.Errorf("Error when setting up conntrack parameters, some information may be missing from exported flows: %v", err)
 	}
 
 	return &connTrackSystem{
-		nodeConfig,
+		nodeStore,
 		serviceCIDRv4,
 		serviceCIDRv6,
 		isAntreaProxyEnabled,
@@ -79,7 +80,7 @@ func (ct *connTrackSystem) DumpFlows(zoneFilter uint16) ([]*flowexporter.Connect
 		return nil, 0, fmt.Errorf("error when dumping flows from conntrack: %v", err)
 	}
 
-	filteredConns := filterAntreaConns(conns, ct.nodeConfig, svcCIDR, zoneFilter, ct.isAntreaProxyEnabled)
+	filteredConns := filterAntreaConns(conns, ct.nodeStore, svcCIDR, zoneFilter, ct.isAntreaProxyEnabled)
 	klog.V(2).Infof("No. of flow exporter considered flows in Antrea zoneID: %d", len(filteredConns))
 
 	return filteredConns, len(conns), nil

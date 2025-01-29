@@ -695,7 +695,7 @@ func run(o *Options) error {
 			podStore,
 			proxier,
 			k8sClient,
-			nodeRouteController,
+			nodeInformer.Informer(),
 			networkConfig.TrafficEncapMode,
 			nodeConfig,
 			v4Enabled,

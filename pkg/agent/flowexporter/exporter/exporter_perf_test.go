@@ -183,7 +183,7 @@ func NewFlowExporterForTest(o *flowexporter.FlowExporterOptions) *FlowExporter {
 		exporterInput:          expInput,
 		ipfixSet:               ipfixentities.NewSet(false),
 		k8sClient:              nil,
-		nodeRouteController:    nil,
+		nodeStore:              nil,
 		isNetworkPolicyOnly:    false,
 		nodeName:               nodeName,
 		conntrackPriorityQueue: conntrackConnStore.GetPriorityQueue(),
