@@ -18,11 +18,14 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/containernetworking/plugins/pkg/ip"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
@@ -77,7 +80,18 @@ type Controller struct {
 	// installedNodes records routes and flows installation states of Nodes.
 	// The key is the host name of the Node, the value is the nodeRouteInfo of the Node.
 	// A node will be in the map after its flows and routes are installed successfully.
-	installedNodes  cache.Indexer
+	// The implementation of addNodeRoute guarantees that we never have objects with duplicate
+	// PodCIDRs in installedNodes.
+	installedNodes cache.Indexer
+	// podSubnetsMutex protects access to the podSubnets set.
+	podSubnetsMutex sync.RWMutex
+	// podSubnets is a set which stores all known PodCIDRs in the cluster as masked netip.Prefix
+	// objects. Note that podSubnets must always be consistent with installedNodes, which means
+	// that podSubnets must be updated jointly with installedNodes. This guarantees correctness
+	// as we do not allow duplicate PodCIDRs in installedNodes.
+	podSubnets      sets.Set[netip.Prefix]
+	maskSizeV4      int
+	maskSizeV6      int
 	wireGuardClient wireguard.Interface
 	// ipsecCertificateManager is useful for determining whether the ipsec certificate has been configured
 	// or not when IPsec is enabled with "cert" mode. The NodeRouteController must wait for the certificate
@@ -124,9 +138,20 @@ func NewNodeRouteController(
 			},
 		),
 		installedNodes:          cache.NewIndexer(nodeRouteInfoKeyFunc, cache.Indexers{nodeRouteInfoPodCIDRIndexName: nodeRouteInfoPodCIDRIndexFunc}),
+		podSubnets:              sets.New[netip.Prefix](),
 		wireGuardClient:         wireguardClient,
 		ipsecCertificateManager: ipsecCertificateManager,
 		flowRestoreCompleteWait: flowRestoreCompleteWait.Increment(),
+	}
+	if nodeConfig.PodIPv4CIDR != nil {
+		prefix, _ := cidrToPrefix(nodeConfig.PodIPv4CIDR)
+		controller.podSubnets.Insert(prefix)
+		controller.maskSizeV4 = prefix.Bits()
+	}
+	if nodeConfig.PodIPv6CIDR != nil {
+		prefix, _ := cidrToPrefix(nodeConfig.PodIPv6CIDR)
+		controller.podSubnets.Insert(prefix)
+		controller.maskSizeV6 = prefix.Bits()
 	}
 	registration, _ := nodeInformer.Informer().AddEventHandlerWithResyncPeriod(
 		cache.ResourceEventHandlerDetailedFuncs{
@@ -481,6 +506,12 @@ func (c *Controller) deleteNodeRoute(nodeName string) error {
 	if err := c.ofClient.UninstallNodeFlows(nodeName); err != nil {
 		return fmt.Errorf("failed to uninstall flows to Node %s: %v", nodeName, err)
 	}
+	func() {
+		subnets, _ := cidrsToPrefixes(nodeRouteInfo.podCIDRs)
+		c.podSubnetsMutex.Lock()
+		defer c.podSubnetsMutex.Unlock()
+		c.podSubnets.Delete(subnets...)
+	}()
 	c.installedNodes.Delete(obj)
 
 	if c.networkConfig.TrafficEncryptionMode == config.TrafficEncryptionModeIPSec {
@@ -638,6 +669,13 @@ func (c *Controller) addNodeRoute(nodeName string, node *corev1.Node) error {
 		wireGuardPublicKey: peerWireGuardPublicKey,
 	})
 
+	func() {
+		subnets, _ := cidrsToPrefixes(peerPodCIDRs)
+		c.podSubnetsMutex.Lock()
+		defer c.podSubnetsMutex.Unlock()
+		c.podSubnets.Insert(subnets...)
+	}()
+
 	return err
 }
 
@@ -773,40 +811,31 @@ func ParseTunnelInterfaceConfig(
 	return interfaceConfig
 }
 
-func (c *Controller) IPInPodSubnets(ip net.IP) bool {
-	var ipCIDR *net.IPNet
-	var curNodeCIDRStr string
-	if ip.To4() != nil {
-		var podIPv4CIDRMaskSize int
-		if c.nodeConfig.PodIPv4CIDR != nil {
-			curNodeCIDRStr = c.nodeConfig.PodIPv4CIDR.String()
-			podIPv4CIDRMaskSize, _ = c.nodeConfig.PodIPv4CIDR.Mask.Size()
-		} else {
-			return false
-		}
-		v4Mask := net.CIDRMask(podIPv4CIDRMaskSize, utilip.V4BitLen)
-		ipCIDR = &net.IPNet{
-			IP:   ip.Mask(v4Mask),
-			Mask: v4Mask,
-		}
-
+func (c *Controller) findPodSubnetForIP(ip netip.Addr) (netip.Prefix, bool) {
+	var maskSize int
+	if ip.Is4() {
+		maskSize = c.maskSizeV4
 	} else {
-		var podIPv6CIDRMaskSize int
-		if c.nodeConfig.PodIPv6CIDR != nil {
-			curNodeCIDRStr = c.nodeConfig.PodIPv6CIDR.String()
-			podIPv6CIDRMaskSize, _ = c.nodeConfig.PodIPv6CIDR.Mask.Size()
-		} else {
-			return false
-		}
-		v6Mask := net.CIDRMask(podIPv6CIDRMaskSize, utilip.V6BitLen)
-		ipCIDR = &net.IPNet{
-			IP:   ip.Mask(v6Mask),
-			Mask: v6Mask,
-		}
+		maskSize = c.maskSizeV6
 	}
-	ipCIDRStr := ipCIDR.String()
-	nodeInCluster, _ := c.installedNodes.ByIndex(nodeRouteInfoPodCIDRIndexName, ipCIDRStr)
-	return len(nodeInCluster) > 0 || ipCIDRStr == curNodeCIDRStr
+	if maskSize == 0 {
+		return netip.Prefix{}, false
+	}
+	prefix, _ := ip.Prefix(maskSize)
+	c.podSubnetsMutex.RLock()
+	defer c.podSubnetsMutex.RUnlock()
+	return prefix, c.podSubnets.Has(prefix)
+}
+
+// IPInPodSubnets returns two boolean values. The first one indicates whether the IP can be found in
+// a PodCIDR for one of the cluster Nodes. The second one indicates whether the IP is used as a
+// gwateway IP. The second boolean value can only be true if the first one is true.
+func (c *Controller) LookupIPInPodSubnets(ip netip.Addr) (bool, bool) {
+	prefix, ok := c.findPodSubnetForIP(ip)
+	if !ok {
+		return false, false
+	}
+	return ok, ip == util.GetGatewayIPForPodPrefix(prefix)
 }
 
 // getNodeMAC gets Node's br-int MAC from its annotation. It is only for Windows Noencap mode.
@@ -820,4 +849,25 @@ func getNodeMAC(node *corev1.Node) (net.HardwareAddr, error) {
 		return nil, fmt.Errorf("failed to parse MAC `%s`: %v", macStr, err)
 	}
 	return mac, nil
+}
+
+func cidrToPrefix(cidr *net.IPNet) (netip.Prefix, error) {
+	addr, ok := netip.AddrFromSlice(cidr.IP)
+	if !ok {
+		return netip.Prefix{}, fmt.Errorf("invalid IP in cidr: %v", cidr)
+	}
+	size, _ := cidr.Mask.Size()
+	return addr.Prefix(size)
+}
+
+func cidrsToPrefixes(cidrs []*net.IPNet) ([]netip.Prefix, error) {
+	prefixes := make([]netip.Prefix, len(cidrs))
+	for idx := range cidrs {
+		prefix, err := cidrToPrefix(cidrs[idx])
+		if err != nil {
+			return nil, err
+		}
+		prefixes[idx] = prefix
+	}
+	return prefixes, nil
 }
