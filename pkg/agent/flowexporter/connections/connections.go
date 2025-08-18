@@ -26,6 +26,7 @@ import (
 	"antrea.io/antrea/pkg/agent/flowexporter/options"
 	"antrea.io/antrea/pkg/agent/flowexporter/priorityqueue"
 	"antrea.io/antrea/pkg/agent/proxy"
+	"antrea.io/antrea/pkg/querier"
 	"antrea.io/antrea/pkg/util/objectstore"
 )
 
@@ -35,6 +36,7 @@ const (
 
 type connectionStore struct {
 	connections            map[connection.ConnectionKey]*connection.Connection
+	networkPolicyQuerier   querier.AgentNetworkPolicyInfoQuerier
 	podStore               objectstore.PodStore
 	antreaProxier          proxy.Proxier
 	expirePriorityQueue    *priorityqueue.ExpirePriorityQueue
@@ -43,11 +45,13 @@ type connectionStore struct {
 }
 
 func NewConnectionStore(
+	npQuerier querier.AgentNetworkPolicyInfoQuerier,
 	podStore objectstore.PodStore,
 	proxier proxy.Proxier,
 	o *options.FlowExporterOptions) connectionStore {
 	return connectionStore{
 		connections:            make(map[connection.ConnectionKey]*connection.Connection),
+		networkPolicyQuerier:   npQuerier,
 		podStore:               podStore,
 		antreaProxier:          proxier,
 		expirePriorityQueue:    priorityqueue.NewExpirePriorityQueue(o.ActiveFlowTimeout, o.IdleFlowTimeout),

@@ -651,6 +651,14 @@ func (f *featurePodConnectivity) conntrackFlows() []binding.Flow {
 				MatchCTStateTrk(true).
 				Action().Drop().
 				Done(),
+			ConntrackCommitTable.ofTable.BuildFlow(priorityHigh).
+				Cookie(cookieID).
+				MatchProtocol(ipProtocol).
+				MatchCTStateNew(true).
+				MatchCTStateTrk(true).
+				MatchCTZone(f.snatCtZones[ipProtocol]).
+				Action().GotoTable(ConntrackCommitTable.GetNext()).
+				Done(),
 			// This generates the flow to match the first packet of non-Service connection and mark the source of the connection
 			// by copying PktSourceField to ConnSourceCTMarkField.
 			ConntrackCommitTable.ofTable.BuildFlow(priorityNormal).
@@ -658,6 +666,7 @@ func (f *featurePodConnectivity) conntrackFlows() []binding.Flow {
 				MatchProtocol(ipProtocol).
 				MatchCTStateNew(true).
 				MatchCTStateTrk(true).
+				// Probbaly not needed anymore because of high priority flow above
 				MatchCTStateSNAT(false).
 				MatchCTMark(NotServiceCTMark).
 				Action().CT(true, ConntrackCommitTable.GetNext(), f.ctZones[ipProtocol], f.ctZoneSrcField).
@@ -665,12 +674,22 @@ func (f *featurePodConnectivity) conntrackFlows() []binding.Flow {
 				LoadToCtMark(ConnAllowedCTMark).
 				CTDone().
 				Done(),
+			// This does not work as expected: https://github.com/openvswitch/ovs-issues/issues/370
+			// ConntrackCommitTable.ofTable.BuildFlow(priorityLow).
+			// 	Cookie(cookieID).
+			// 	MatchProtocol(ipProtocol).
+			// 	MatchCTStateNew(true).
+			// 	MatchCTStateTrk(true).
+			// 	MatchCTStateSNAT(false).
+			// 	Action().CT(true, ConntrackCommitTable.GetNext(), f.ctZones[ipProtocol], f.ctZoneSrcField).
+			// 	LoadToCtMark(ConnAllowedCTMark).
+			// 	CTDone().
+			// 	Done(),
 			ConntrackCommitTable.ofTable.BuildFlow(priorityLow).
 				Cookie(cookieID).
 				MatchProtocol(ipProtocol).
 				MatchCTStateNew(true).
 				MatchCTStateTrk(true).
-				MatchCTStateSNAT(false).
 				Action().CT(true, ConntrackCommitTable.GetNext(), f.ctZones[ipProtocol], f.ctZoneSrcField).
 				LoadToCtMark(ConnAllowedCTMark).
 				CTDone().
