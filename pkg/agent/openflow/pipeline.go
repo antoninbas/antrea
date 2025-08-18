@@ -670,7 +670,7 @@ func (f *featurePodConnectivity) conntrackFlows() []binding.Flow {
 				MatchProtocol(ipProtocol).
 				MatchCTStateNew(true).
 				MatchCTStateTrk(true).
-				MatchCTMark(NotHairpinCTMark).
+				MatchCTStateSNAT(false).
 				Action().CT(true, ConntrackCommitTable.GetNext(), f.ctZones[ipProtocol], f.ctZoneSrcField).
 				LoadToCtMark(ConnAllowedCTMark).
 				CTDone().
