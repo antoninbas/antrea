@@ -174,12 +174,12 @@ var (
 )
 
 type testFlow struct {
-	srcIP            string
-	dstIP            string
-	srcPodName       string
-	dstPodName       string
-	svcIP            string
-	checkSrcNodeInfo bool
+	srcIP                   string
+	dstIP                   string
+	srcPodName              string
+	dstPodName              string
+	svcIP                   string
+	srcNodeInfoNotAvailable bool
 }
 
 type flowRecord struct {
@@ -555,16 +555,14 @@ func testHelper(t *testing.T, data *TestData, isIPv6 bool) {
 		addLabelToTestPods(t, data, label, podNames)
 		deployDenyAntreaNetworkPolicies(t, data, "perftest-a", "perftest-b", "perftest-d", controlPlaneNodeName(), controlPlaneNodeName(), true)
 		testFlow1 := testFlow{
-			srcPodName:       "perftest-a",
-			dstPodName:       "perftest-b",
-			svcIP:            svcB.Spec.ClusterIP,
-			checkSrcNodeInfo: true,
+			srcPodName: "perftest-a",
+			dstPodName: "perftest-b",
+			svcIP:      svcB.Spec.ClusterIP,
 		}
 		testFlow2 := testFlow{
-			srcPodName:       "perftest-a",
-			dstPodName:       "perftest-d",
-			svcIP:            svcD.Spec.ClusterIP,
-			checkSrcNodeInfo: true,
+			srcPodName: "perftest-a",
+			dstPodName: "perftest-d",
+			svcIP:      svcD.Spec.ClusterIP,
 		}
 		if !isIPv6 {
 			testFlow1.srcIP, testFlow1.dstIP, testFlow2.srcIP, testFlow2.dstIP = podAIPs.IPv4.String(), podBIPs.IPv4.String(), podAIPs.IPv4.String(), podDIPs.IPv4.String()
@@ -585,16 +583,14 @@ func testHelper(t *testing.T, data *TestData, isIPv6 bool) {
 		addLabelToTestPods(t, data, label, podNames)
 		deployDenyAntreaNetworkPolicies(t, data, "perftest-a", "perftest-b", "perftest-d", controlPlaneNodeName(), controlPlaneNodeName(), false)
 		testFlow1 := testFlow{
-			srcPodName:       "perftest-a",
-			dstPodName:       "perftest-b",
-			svcIP:            svcB.Spec.ClusterIP,
-			checkSrcNodeInfo: true,
+			srcPodName: "perftest-a",
+			dstPodName: "perftest-b",
+			svcIP:      svcB.Spec.ClusterIP,
 		}
 		testFlow2 := testFlow{
-			srcPodName:       "perftest-a",
-			dstPodName:       "perftest-d",
-			svcIP:            svcD.Spec.ClusterIP,
-			checkSrcNodeInfo: true,
+			srcPodName: "perftest-a",
+			dstPodName: "perftest-d",
+			svcIP:      svcD.Spec.ClusterIP,
 		}
 		if !isIPv6 {
 			testFlow1.srcIP, testFlow1.dstIP, testFlow2.srcIP, testFlow2.dstIP = podAIPs.IPv4.String(), podBIPs.IPv4.String(), podAIPs.IPv4.String(), podDIPs.IPv4.String()
@@ -708,16 +704,15 @@ func testHelper(t *testing.T, data *TestData, isIPv6 bool) {
 		// to retrieve information that is exclusive to the source Node (service information / egress policy
 		// information) as the connection will be reset and removed from conntrack.
 		testFlow1 := testFlow{
-			srcPodName:       "perftest-a",
-			dstPodName:       "perftest-c",
-			svcIP:            svcC.Spec.ClusterIP,
-			checkSrcNodeInfo: false,
+			srcPodName:              "perftest-a",
+			dstPodName:              "perftest-c",
+			svcIP:                   svcC.Spec.ClusterIP,
+			srcNodeInfoNotAvailable: true,
 		}
 		testFlow2 := testFlow{
-			srcPodName:       "perftest-a",
-			dstPodName:       "perftest-e",
-			svcIP:            svcE.Spec.ClusterIP,
-			checkSrcNodeInfo: true,
+			srcPodName: "perftest-a",
+			dstPodName: "perftest-e",
+			svcIP:      svcE.Spec.ClusterIP,
 		}
 		if !isIPv6 {
 			testFlow1.srcIP, testFlow1.dstIP, testFlow2.srcIP, testFlow2.dstIP = podAIPs.IPv4.String(), podCIPs.IPv4.String(), podAIPs.IPv4.String(), podEIPs.IPv4.String()
@@ -738,16 +733,14 @@ func testHelper(t *testing.T, data *TestData, isIPv6 bool) {
 		addLabelToTestPods(t, data, label, podNames)
 		deployDenyAntreaNetworkPolicies(t, data, "perftest-a", "perftest-c", "perftest-e", controlPlaneNodeName(), workerNodeName(1), false)
 		testFlow1 := testFlow{
-			srcPodName:       "perftest-a",
-			dstPodName:       "perftest-c",
-			svcIP:            svcC.Spec.ClusterIP,
-			checkSrcNodeInfo: true,
+			srcPodName: "perftest-a",
+			dstPodName: "perftest-c",
+			svcIP:      svcC.Spec.ClusterIP,
 		}
 		testFlow2 := testFlow{
-			srcPodName:       "perftest-a",
-			dstPodName:       "perftest-e",
-			svcIP:            svcE.Spec.ClusterIP,
-			checkSrcNodeInfo: true,
+			srcPodName: "perftest-a",
+			dstPodName: "perftest-e",
+			svcIP:      svcE.Spec.ClusterIP,
 		}
 		if !isIPv6 {
 			testFlow1.srcIP, testFlow1.dstIP, testFlow2.srcIP, testFlow2.dstIP = podAIPs.IPv4.String(), podCIPs.IPv4.String(), podAIPs.IPv4.String(), podEIPs.IPv4.String()
@@ -1215,17 +1208,20 @@ func checkRecordsForDenyFlowsCollector(t *testing.T, data *TestData, testFlow1, 
 	// Iterate over records and build some results to test with expected results
 	for _, record := range records {
 		var srcPodName, dstPodName string
+		var svcIP string
 		var checkSrcNodeInfo bool
 		if strings.Contains(record, src_flow1) && strings.Contains(record, dst_flow1) {
 			srcPodName = testFlow1.srcPodName
 			dstPodName = testFlow1.dstPodName
-			checkSrcNodeInfo = testFlow1.checkSrcNodeInfo
+			svcIP = testFlow1.svcIP
+			checkSrcNodeInfo = !testFlow1.srcNodeInfoNotAvailable
 		} else if strings.Contains(record, src_flow2) && strings.Contains(record, dst_flow2) {
 			srcPodName = testFlow2.srcPodName
 			dstPodName = testFlow2.dstPodName
-			checkSrcNodeInfo = testFlow2.checkSrcNodeInfo
+			svcIP = testFlow2.svcIP
+			checkSrcNodeInfo = !testFlow2.srcNodeInfoNotAvailable
 		}
-		require.True(t, !isIntraNode || checkSrcNodeInfo, "checkSrcNodeInfo should always be true for intra-Node flows")
+		require.True(t, !isIntraNode || checkSrcNodeInfo, "source Node info should always be available for intra-Node flows")
 
 		if strings.Contains(record, src_flow1) && strings.Contains(record, dst_flow1) || strings.Contains(record, src_flow2) && strings.Contains(record, dst_flow2) {
 			ingressRejectStr := fmt.Sprintf("ingressNetworkPolicyRuleAction: %d", ipfixregistry.NetworkPolicyRuleActionReject)
@@ -1276,7 +1272,7 @@ func checkRecordsForDenyFlowsCollector(t *testing.T, data *TestData, testFlow1, 
 					assert.Contains(record, fmt.Sprintf("egressNetworkPolicyType: %d", ipfixregistry.PolicyTypeAntreaNetworkPolicy), "Record does not have the correct NetworkPolicy Type with the egress allow rule")
 				}
 			}
-			if checkSrcNodeInfo {
+			if checkSrcNodeInfo && svcIP != "" {
 				destinationServicePortName := data.testNamespace + "/" + dstPodName
 				assert.Contains(record, fmt.Sprintf("destinationServicePortName: %s", destinationServicePortName), "Record does not have correct destinationServicePortName")
 				assert.Contains(record, fmt.Sprintf("destinationServicePort: %d", iperfSvcPort), "Record does not have correct destinationServicePort")
@@ -1295,15 +1291,18 @@ func checkRecordsForDenyFlowsClickHouse(t *testing.T, data *TestData, testFlow1,
 	// Iterate over records and build some results to test with expected results
 	for _, record := range records {
 		var srcPodName, dstPodName string
+		var svcIP string
 		var checkSrcNodeInfo bool
 		if record.SourceIP == testFlow1.srcIP && (record.DestinationIP == testFlow1.dstIP || record.DestinationClusterIP == testFlow1.dstIP) {
 			srcPodName = testFlow1.srcPodName
 			dstPodName = testFlow1.dstPodName
-			checkSrcNodeInfo = testFlow1.checkSrcNodeInfo
+			svcIP = testFlow1.svcIP
+			checkSrcNodeInfo = !testFlow1.srcNodeInfoNotAvailable
 		} else if record.SourceIP == testFlow2.srcIP && (record.DestinationIP == testFlow2.dstIP || record.DestinationClusterIP == testFlow2.dstIP) {
 			srcPodName = testFlow2.srcPodName
 			dstPodName = testFlow2.dstPodName
-			checkSrcNodeInfo = testFlow2.checkSrcNodeInfo
+			svcIP = testFlow2.svcIP
+			checkSrcNodeInfo = !testFlow2.srcNodeInfoNotAvailable
 		}
 		require.True(t, !isIntraNode || checkSrcNodeInfo, "checkSrcNodeInfo should always be true for intra-Node flows")
 
@@ -1314,7 +1313,7 @@ func checkRecordsForDenyFlowsClickHouse(t *testing.T, data *TestData, testFlow1,
 			checkPodAndNodeDataClickHouse(data, t, record, srcPodName, controlPlaneNodeName(), dstPodName, workerNodeName(1))
 			checkFlowTypeClickHouse(t, record, ipfixregistry.FlowTypeInterNode)
 		}
-		if checkSrcNodeInfo {
+		if checkSrcNodeInfo && svcIP != "" {
 			destinationServicePortName := data.testNamespace + "/" + dstPodName
 			assert.Contains(t, record.DestinationServicePortName, destinationServicePortName)
 			assert.Equal(t, iperfSvcPort, int(record.DestinationServicePort))
