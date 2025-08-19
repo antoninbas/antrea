@@ -174,12 +174,12 @@ var (
 )
 
 type testFlow struct {
-	srcIP       string
-	dstIP       string
-	srcPodName  string
-	dstPodName  string
-	svcIP       string
-	checkDstSvc bool
+	srcIP            string
+	dstIP            string
+	srcPodName       string
+	dstPodName       string
+	svcIP            string
+	checkSrcNodeInfo bool
 }
 
 type flowRecord struct {
@@ -555,16 +555,16 @@ func testHelper(t *testing.T, data *TestData, isIPv6 bool) {
 		addLabelToTestPods(t, data, label, podNames)
 		deployDenyAntreaNetworkPolicies(t, data, "perftest-a", "perftest-b", "perftest-d", controlPlaneNodeName(), controlPlaneNodeName(), true)
 		testFlow1 := testFlow{
-			srcPodName:  "perftest-a",
-			dstPodName:  "perftest-b",
-			svcIP:       svcB.Spec.ClusterIP,
-			checkDstSvc: true,
+			srcPodName:       "perftest-a",
+			dstPodName:       "perftest-b",
+			svcIP:            svcB.Spec.ClusterIP,
+			checkSrcNodeInfo: true,
 		}
 		testFlow2 := testFlow{
-			srcPodName:  "perftest-a",
-			dstPodName:  "perftest-d",
-			svcIP:       svcD.Spec.ClusterIP,
-			checkDstSvc: true,
+			srcPodName:       "perftest-a",
+			dstPodName:       "perftest-d",
+			svcIP:            svcD.Spec.ClusterIP,
+			checkSrcNodeInfo: true,
 		}
 		if !isIPv6 {
 			testFlow1.srcIP, testFlow1.dstIP, testFlow2.srcIP, testFlow2.dstIP = podAIPs.IPv4.String(), podBIPs.IPv4.String(), podAIPs.IPv4.String(), podDIPs.IPv4.String()
@@ -585,16 +585,16 @@ func testHelper(t *testing.T, data *TestData, isIPv6 bool) {
 		addLabelToTestPods(t, data, label, podNames)
 		deployDenyAntreaNetworkPolicies(t, data, "perftest-a", "perftest-b", "perftest-d", controlPlaneNodeName(), controlPlaneNodeName(), false)
 		testFlow1 := testFlow{
-			srcPodName:  "perftest-a",
-			dstPodName:  "perftest-b",
-			svcIP:       svcB.Spec.ClusterIP,
-			checkDstSvc: true,
+			srcPodName:       "perftest-a",
+			dstPodName:       "perftest-b",
+			svcIP:            svcB.Spec.ClusterIP,
+			checkSrcNodeInfo: true,
 		}
 		testFlow2 := testFlow{
-			srcPodName:  "perftest-a",
-			dstPodName:  "perftest-d",
-			svcIP:       svcD.Spec.ClusterIP,
-			checkDstSvc: true,
+			srcPodName:       "perftest-a",
+			dstPodName:       "perftest-d",
+			svcIP:            svcD.Spec.ClusterIP,
+			checkSrcNodeInfo: true,
 		}
 		if !isIPv6 {
 			testFlow1.srcIP, testFlow1.dstIP, testFlow2.srcIP, testFlow2.dstIP = podAIPs.IPv4.String(), podBIPs.IPv4.String(), podAIPs.IPv4.String(), podDIPs.IPv4.String()
@@ -704,22 +704,20 @@ func testHelper(t *testing.T, data *TestData, isIPv6 bool) {
 		label := "InterNodeDenyConnIngressANPThroughSvc"
 		addLabelToTestPods(t, data, label, podNames)
 		deployDenyAntreaNetworkPolicies(t, data, "perftest-a", "perftest-c", "perftest-e", controlPlaneNodeName(), workerNodeName(1), true)
-		// In theory, it's not possible to retrieve service information for these two flows because the packets are
-		// either rejected or dropped in other nodes. Nevertheless, we can still observe the connection being recorded
-		// in the conntrack table on the source node in cases of drop. This results in the aggregation process still
-		// occurring within our flow-aggregator. Consequently, we can still see the service information when dealing
-		// with inter-node traffic subject to an ingress drop network policy
+		// For the reject action at the destination Node (i.e., by an ingress policy rule), it is not possible
+		// to retrieve information that is exclusive to the source Node (service information / egress policy
+		// information) as the connection will be reset and removed from conntrack.
 		testFlow1 := testFlow{
-			srcPodName:  "perftest-a",
-			dstPodName:  "perftest-c",
-			svcIP:       svcC.Spec.ClusterIP,
-			checkDstSvc: false,
+			srcPodName:       "perftest-a",
+			dstPodName:       "perftest-c",
+			svcIP:            svcC.Spec.ClusterIP,
+			checkSrcNodeInfo: false,
 		}
 		testFlow2 := testFlow{
-			srcPodName:  "perftest-a",
-			dstPodName:  "perftest-e",
-			svcIP:       svcE.Spec.ClusterIP,
-			checkDstSvc: true,
+			srcPodName:       "perftest-a",
+			dstPodName:       "perftest-e",
+			svcIP:            svcE.Spec.ClusterIP,
+			checkSrcNodeInfo: true,
 		}
 		if !isIPv6 {
 			testFlow1.srcIP, testFlow1.dstIP, testFlow2.srcIP, testFlow2.dstIP = podAIPs.IPv4.String(), podCIPs.IPv4.String(), podAIPs.IPv4.String(), podEIPs.IPv4.String()
@@ -740,16 +738,16 @@ func testHelper(t *testing.T, data *TestData, isIPv6 bool) {
 		addLabelToTestPods(t, data, label, podNames)
 		deployDenyAntreaNetworkPolicies(t, data, "perftest-a", "perftest-c", "perftest-e", controlPlaneNodeName(), workerNodeName(1), false)
 		testFlow1 := testFlow{
-			srcPodName:  "perftest-a",
-			dstPodName:  "perftest-c",
-			svcIP:       svcC.Spec.ClusterIP,
-			checkDstSvc: true,
+			srcPodName:       "perftest-a",
+			dstPodName:       "perftest-c",
+			svcIP:            svcC.Spec.ClusterIP,
+			checkSrcNodeInfo: true,
 		}
 		testFlow2 := testFlow{
-			srcPodName:  "perftest-a",
-			dstPodName:  "perftest-e",
-			svcIP:       svcE.Spec.ClusterIP,
-			checkDstSvc: true,
+			srcPodName:       "perftest-a",
+			dstPodName:       "perftest-e",
+			svcIP:            svcE.Spec.ClusterIP,
+			checkSrcNodeInfo: true,
 		}
 		if !isIPv6 {
 			testFlow1.srcIP, testFlow1.dstIP, testFlow2.srcIP, testFlow2.dstIP = podAIPs.IPv4.String(), podCIPs.IPv4.String(), podAIPs.IPv4.String(), podEIPs.IPv4.String()
@@ -1217,16 +1215,18 @@ func checkRecordsForDenyFlowsCollector(t *testing.T, data *TestData, testFlow1, 
 	// Iterate over records and build some results to test with expected results
 	for _, record := range records {
 		var srcPodName, dstPodName string
-		var checkDstSvc bool
+		var checkSrcNodeInfo bool
 		if strings.Contains(record, src_flow1) && strings.Contains(record, dst_flow1) {
 			srcPodName = testFlow1.srcPodName
 			dstPodName = testFlow1.dstPodName
-			checkDstSvc = testFlow1.checkDstSvc
+			checkSrcNodeInfo = testFlow1.checkSrcNodeInfo
 		} else if strings.Contains(record, src_flow2) && strings.Contains(record, dst_flow2) {
 			srcPodName = testFlow2.srcPodName
 			dstPodName = testFlow2.dstPodName
-			checkDstSvc = testFlow2.checkDstSvc
+			checkSrcNodeInfo = testFlow2.checkSrcNodeInfo
 		}
+		require.True(t, !isIntraNode || checkSrcNodeInfo, "checkSrcNodeInfo should always be true for intra-Node flows")
+
 		if strings.Contains(record, src_flow1) && strings.Contains(record, dst_flow1) || strings.Contains(record, src_flow2) && strings.Contains(record, dst_flow2) {
 			ingressRejectStr := fmt.Sprintf("ingressNetworkPolicyRuleAction: %d", ipfixregistry.NetworkPolicyRuleActionReject)
 			ingressDropStr := fmt.Sprintf("ingressNetworkPolicyRuleAction: %d", ipfixregistry.NetworkPolicyRuleActionDrop)
@@ -1269,14 +1269,14 @@ func checkRecordsForDenyFlowsCollector(t *testing.T, data *TestData, testFlow1, 
 					assert.Contains(record, fmt.Sprintf("egressNetworkPolicyType: %d", ipfixregistry.PolicyTypeAntreaNetworkPolicy), "Record does not have the correct NetworkPolicy Type with the egress drop rule")
 					assert.Contains(record, fmt.Sprintf("egressNetworkPolicyRuleName: %s", testEgressRuleName), "Record does not have the correct NetworkPolicy RuleName with the egress drop rule")
 				}
-				if strings.Contains(record, ingressRejectStr) || strings.Contains(record, ingressDropStr) {
+				if checkSrcNodeInfo && (strings.Contains(record, ingressRejectStr) || strings.Contains(record, ingressDropStr)) {
 					// For ingress deny rules, we also define an egress allow policy rule to ensure
 					// that the information is reported correctly.
 					assert.Contains(record, egressAllowANPName, "Record does not have Antrea NetworkPolicy name with egress allow rule")
 					assert.Contains(record, fmt.Sprintf("egressNetworkPolicyType: %d", ipfixregistry.PolicyTypeAntreaNetworkPolicy), "Record does not have the correct NetworkPolicy Type with the egress allow rule")
 				}
 			}
-			if checkDstSvc {
+			if checkSrcNodeInfo {
 				destinationServicePortName := data.testNamespace + "/" + dstPodName
 				assert.Contains(record, fmt.Sprintf("destinationServicePortName: %s", destinationServicePortName), "Record does not have correct destinationServicePortName")
 				assert.Contains(record, fmt.Sprintf("destinationServicePort: %d", iperfSvcPort), "Record does not have correct destinationServicePort")
@@ -1295,16 +1295,17 @@ func checkRecordsForDenyFlowsClickHouse(t *testing.T, data *TestData, testFlow1,
 	// Iterate over records and build some results to test with expected results
 	for _, record := range records {
 		var srcPodName, dstPodName string
-		var checkDstSvc bool
+		var checkSrcNodeInfo bool
 		if record.SourceIP == testFlow1.srcIP && (record.DestinationIP == testFlow1.dstIP || record.DestinationClusterIP == testFlow1.dstIP) {
 			srcPodName = testFlow1.srcPodName
 			dstPodName = testFlow1.dstPodName
-			checkDstSvc = testFlow1.checkDstSvc
+			checkSrcNodeInfo = testFlow1.checkSrcNodeInfo
 		} else if record.SourceIP == testFlow2.srcIP && (record.DestinationIP == testFlow2.dstIP || record.DestinationClusterIP == testFlow2.dstIP) {
 			srcPodName = testFlow2.srcPodName
 			dstPodName = testFlow2.dstPodName
-			checkDstSvc = testFlow2.checkDstSvc
+			checkSrcNodeInfo = testFlow2.checkSrcNodeInfo
 		}
+		require.True(t, !isIntraNode || checkSrcNodeInfo, "checkSrcNodeInfo should always be true for intra-Node flows")
 
 		if isIntraNode {
 			checkPodAndNodeDataClickHouse(data, t, record, srcPodName, controlPlaneNodeName(), dstPodName, controlPlaneNodeName())
@@ -1313,7 +1314,7 @@ func checkRecordsForDenyFlowsClickHouse(t *testing.T, data *TestData, testFlow1,
 			checkPodAndNodeDataClickHouse(data, t, record, srcPodName, controlPlaneNodeName(), dstPodName, workerNodeName(1))
 			checkFlowTypeClickHouse(t, record, ipfixregistry.FlowTypeInterNode)
 		}
-		if checkDstSvc {
+		if checkSrcNodeInfo {
 			destinationServicePortName := data.testNamespace + "/" + dstPodName
 			assert.Contains(t, record.DestinationServicePortName, destinationServicePortName)
 			assert.Equal(t, iperfSvcPort, int(record.DestinationServicePort))
@@ -1349,6 +1350,12 @@ func checkRecordsForDenyFlowsClickHouse(t *testing.T, data *TestData, testFlow1,
 				assert.Equal(record.EgressNetworkPolicyNamespace, data.testNamespace, "Record does not have correct egressNetworkPolicyNamespace")
 				assert.Equal(record.EgressNetworkPolicyType, ipfixregistry.PolicyTypeAntreaNetworkPolicy, "Record does not have the correct NetworkPolicy Type with the egress drop rule")
 				assert.Equal(record.EgressNetworkPolicyRuleName, testEgressRuleName, "Record does not have the correct NetworkPolicy RuleName with the egress drop rule")
+			}
+			if checkSrcNodeInfo && (record.IngressNetworkPolicyRuleAction == ipfixregistry.NetworkPolicyRuleActionReject || record.IngressNetworkPolicyRuleAction == ipfixregistry.NetworkPolicyRuleActionDrop) {
+				// For ingress deny rules, we also define an egress allow policy rule to ensure
+				// that the information is reported correctly.
+				assert.Equal(record.EgressNetworkPolicyName, egressAllowANPName, "Record does not have Antrea NetworkPolicy name with egress allow rule")
+				assert.Equal(record.EgressNetworkPolicyType, ipfixregistry.PolicyTypeAntreaNetworkPolicy, "Record does not have the correct NetworkPolicy Type with the egress allow rule")
 			}
 		}
 	}

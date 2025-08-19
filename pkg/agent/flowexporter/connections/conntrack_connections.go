@@ -15,13 +15,10 @@
 package connections
 
 import (
-	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/vmware/go-ipfix/pkg/registry"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 
@@ -193,50 +190,6 @@ func (cs *ConntrackConnectionStore) Poll() ([]int, error) {
 	klog.V(2).Infof("Conntrack polling successful")
 
 	return connsLens, nil
-}
-
-func (cs *ConntrackConnectionStore) addNetworkPolicyMetadata(conn *connection.Connection) {
-	// Retrieve NetworkPolicy Name and Namespace by using the ingress and egress
-	// IDs stored in the connection label.
-	if len(conn.Labels) != 0 {
-		if klog.V(4).Enabled() {
-			klog.InfoS("Setting NetworkPolicy metadata from connection labels", "labels", hex.EncodeToString(conn.Labels))
-		}
-		ingressOfID := binary.LittleEndian.Uint32(conn.Labels[:4])
-		egressOfID := binary.LittleEndian.Uint32(conn.Labels[4:8])
-		if ingressOfID != 0 {
-			policy := cs.networkPolicyQuerier.GetNetworkPolicyByRuleFlowID(ingressOfID)
-			rule := cs.networkPolicyQuerier.GetRuleByFlowID(ingressOfID)
-			if policy == nil || rule == nil {
-				// This should not happen because the rule flow ID to rule mapping is
-				// preserved for max(5s, flowPollInterval) even after the rule deletion.
-				klog.Warningf("Cannot find NetworkPolicy or rule with ingressOfID %v", ingressOfID)
-			} else {
-				conn.IngressNetworkPolicyName = policy.Name
-				conn.IngressNetworkPolicyNamespace = policy.Namespace
-				conn.IngressNetworkPolicyUID = string(policy.UID)
-				conn.IngressNetworkPolicyType = utils.PolicyTypeToUint8(policy.Type)
-				conn.IngressNetworkPolicyRuleName = rule.Name
-				conn.IngressNetworkPolicyRuleAction = registry.NetworkPolicyRuleActionAllow
-			}
-		}
-		if egressOfID != 0 {
-			policy := cs.networkPolicyQuerier.GetNetworkPolicyByRuleFlowID(egressOfID)
-			rule := cs.networkPolicyQuerier.GetRuleByFlowID(egressOfID)
-			if policy == nil || rule == nil {
-				// This should not happen because the rule flow ID to rule mapping is
-				// preserved for max(5s, flowPollInterval) even after the rule deletion.
-				klog.Warningf("Cannot find NetworkPolicy or rule with egressOfID %v", egressOfID)
-			} else {
-				conn.EgressNetworkPolicyName = policy.Name
-				conn.EgressNetworkPolicyNamespace = policy.Namespace
-				conn.EgressNetworkPolicyUID = string(policy.UID)
-				conn.EgressNetworkPolicyType = utils.PolicyTypeToUint8(policy.Type)
-				conn.EgressNetworkPolicyRuleName = rule.Name
-				conn.EgressNetworkPolicyRuleAction = registry.NetworkPolicyRuleActionAllow
-			}
-		}
-	}
 }
 
 // AddOrUpdateConn updates the connection if it is already present, i.e., update timestamp, counters etc.,

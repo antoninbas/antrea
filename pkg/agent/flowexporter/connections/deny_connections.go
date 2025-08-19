@@ -123,6 +123,9 @@ func (ds *DenyConnectionStore) AddOrUpdateConn(conn *connection.Connection, time
 		if conn.Mark&openflow.ServiceCTMark.GetRange().ToNXRange().ToUint32Mask() == openflow.ServiceCTMark.GetValue() {
 			ds.fillServiceInfo(conn, serviceStr)
 		}
+		// For intra-Node flows which are denied by an ingress policy rule, we can retrieve
+		// egress policy information from the CT labels.
+		ds.addNetworkPolicyMetadata(conn)
 		metrics.TotalDenyConnections.Inc()
 		conn.IsActive = true
 		ds.connections[connKey] = conn

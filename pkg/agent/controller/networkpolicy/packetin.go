@@ -15,7 +15,6 @@
 package networkpolicy
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -130,10 +129,6 @@ func (c *Controller) storeDenyConnection(pktIn *ofctrl.PacketIn) error {
 	denyConn.OriginalDestinationPort = tuple.DestinationPort
 	denyConn.Mark = getCTMarkValue(matchers)
 	denyConn.Labels = getCTLabelValue(matchers)
-	klog.InfoS("PACKET IN")
-	if denyConn.Labels != nil {
-		klog.InfoS("CT LABEL", "label", hex.EncodeToString(denyConn.Labels))
-	}
 	nwDstValue := getCTNwDstValue(matchers)
 	dstPortValue := getCTTpDstValue(matchers)
 	if nwDstValue.IsValid() {
