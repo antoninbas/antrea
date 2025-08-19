@@ -624,9 +624,13 @@ func testHelper(t *testing.T, data *TestData, isIPv6 bool) {
 		label := "InterNodeDenyConnIngressANP"
 		addLabelToTestPods(t, data, label, podNames)
 		deployDenyAntreaNetworkPolicies(t, data, "perftest-a", "perftest-c", "perftest-e", controlPlaneNodeName(), workerNodeName(1), true)
+		// For the reject action at the destination Node (i.e., by an ingress policy rule), it is not possible
+		// to retrieve information that is exclusive to the source Node (service information / egress policy
+		// information) as the connection will be reset and removed from conntrack.
 		testFlow1 := testFlow{
-			srcPodName: "perftest-a",
-			dstPodName: "perftest-c",
+			srcPodName:              "perftest-a",
+			dstPodName:              "perftest-c",
+			srcNodeInfoNotAvailable: true,
 		}
 		testFlow2 := testFlow{
 			srcPodName: "perftest-a",
