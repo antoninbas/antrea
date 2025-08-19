@@ -1269,6 +1269,12 @@ func checkRecordsForDenyFlowsCollector(t *testing.T, data *TestData, testFlow1, 
 					assert.Contains(record, fmt.Sprintf("egressNetworkPolicyType: %d", ipfixregistry.PolicyTypeAntreaNetworkPolicy), "Record does not have the correct NetworkPolicy Type with the egress drop rule")
 					assert.Contains(record, fmt.Sprintf("egressNetworkPolicyRuleName: %s", testEgressRuleName), "Record does not have the correct NetworkPolicy RuleName with the egress drop rule")
 				}
+				if strings.Contains(record, ingressRejectStr) || strings.Contains(record, ingressDropStr) {
+					// For ingress deny rules, we also define an egress allow policy rule to ensure
+					// that the information is reported correctly.
+					assert.Contains(record, egressAllowANPName, "Record does not have Antrea NetworkPolicy name with egress allow rule")
+					assert.Contains(record, fmt.Sprintf("egressNetworkPolicyType: %d", ipfixregistry.PolicyTypeAntreaNetworkPolicy), "Record does not have the correct NetworkPolicy Type with the egress allow rule")
+				}
 			}
 			if checkDstSvc {
 				destinationServicePortName := data.testNamespace + "/" + dstPodName
@@ -1690,6 +1696,9 @@ func deployDenyAntreaNetworkPolicies(t *testing.T, data *TestData, srcPod, podRe
 					Action:      secv1beta1.RuleActionDrop,
 					Name:        testIngressRuleName,
 				}})
+		// add an explicit egress allow policy so we can check that egress policy
+		// information is reported correctly when a connection is denied by an ingress
+		// policy rule.
 		builder3 := &utils.AntreaNetworkPolicySpecBuilder{}
 		builder3.SetName(data.testNamespace, egressAllowANPName).
 			SetPriority(2.0).
