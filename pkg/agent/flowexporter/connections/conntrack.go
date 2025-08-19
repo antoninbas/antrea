@@ -86,7 +86,7 @@ func filterAntreaConns(conns []*connection.Connection, nodeConfig *config.NodeCo
 
 		policyAllowed := conn.Mark&openflow.ConnAllowedCTMark.GetValue() != 0
 		if !policyAllowed {
-			if klog.V(4).Enabled() {
+			if klog.V(5).Enabled() {
 				klog.InfoS("Ignoring connection as it may have been denied by a policy rule", "conn", conn)
 			}
 			continue
