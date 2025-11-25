@@ -7,6 +7,7 @@ on:
     - feature/*
   push:
     branches:
+    - test-antctl-check-ci-failures
     - main
     - release-*
     - feature/*
@@ -934,6 +935,10 @@ jobs:
         # To avoid flakes, we choose a long realization timeout.
         run: |
           ./bin/antctl-linux check installation --network-policy-delay 5s
+      - name: Dump logs
+        if: failure()
+        run: |
+          kubectl -n kube-system logs -l app=antrea --tail=-1
 
   validate-prometheus-metrics-doc:
     name: Validate metrics in Prometheus document match running deployment's
